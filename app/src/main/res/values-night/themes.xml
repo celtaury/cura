@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Dark variant: window background + system bars follow the dark palette,
+         so there is no white flash or light strip behind edge-to-edge content. -->
+    <style name="Theme.Cura" parent="android:Theme.Material.NoActionBar" />
+</resources>

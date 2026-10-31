@@ -1,34 +1,22 @@
 package com.celtaury.cura.ui.theme
 
 import androidx.compose.material3.Typography
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import com.celtaury.cura.R
 
-// Set of Material typography styles to start with
-val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
+val InterBlack = FontFamily(Font(R.font.inter_18pt, FontWeight.Black))
+
+// Inter Black carries the display voice (CURA wordmark, big numbers);
+// everything else stays on the platform default for readability.
+val CuraTypography = Typography().let { base ->
+    base.copy(
+        displayLarge = base.displayLarge.copy(fontFamily = InterBlack, fontWeight = FontWeight.Black),
+        displayMedium = base.displayMedium.copy(fontFamily = InterBlack, fontWeight = FontWeight.Black),
+        displaySmall = base.displaySmall.copy(fontFamily = InterBlack, fontWeight = FontWeight.Black),
+        headlineLarge = base.headlineLarge.copy(fontFamily = InterBlack, fontWeight = FontWeight.Black),
+        headlineMedium = base.headlineMedium.copy(fontFamily = InterBlack, fontWeight = FontWeight.Black),
+        titleLarge = base.titleLarge.copy(fontFamily = InterBlack, fontWeight = FontWeight.Black)
     )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
-)
+}

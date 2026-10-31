@@ -1,58 +1,80 @@
 package com.celtaury.cura.ui.theme
 
-import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+private val LightScheme = lightColorScheme(
+    primary = Petrol,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFD2E6E3),
+    onPrimaryContainer = Color(0xFF0B252B),
+    secondary = Color(0xFF4F6F6B),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFD8E8E3),
+    onSecondaryContainer = Color(0xFF10201D),
+    tertiary = Leaf,
+    onTertiary = Color.White,
+    tertiaryContainer = LeafContainer,
+    onTertiaryContainer = Color(0xFF12291C),
+    error = Color(0xFFB3261E),
+    onError = Color.White,
+    errorContainer = Color(0xFFF9DEDC),
+    onErrorContainer = Color(0xFF410E0B),
+    background = Color(0xFFF4F8F3),
+    onBackground = Color(0xFF101B1E),
+    surface = Color.White,
+    onSurface = Color(0xFF101B1E),
+    surfaceVariant = Color(0xFFECF2F0),
+    onSurfaceVariant = Color(0xFF41514F),
+    outline = Color(0xFF71817E),
+    outlineVariant = Color(0xFFC4D2CF),
+    surfaceContainerLow = Color(0xFFF0F5F3),
+    surfaceContainer = Color(0xFFECF2F0),
+    surfaceContainerHigh = Color(0xFFE6EDEA)
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+private val DarkScheme = darkColorScheme(
+    primary = Mint,
+    onPrimary = Color(0xFF06272C),
+    primaryContainer = PetrolDeep,
+    onPrimaryContainer = Color(0xFFC8E9E2),
+    secondary = Color(0xFFA8C8C2),
+    onSecondary = Color(0xFF10201D),
+    secondaryContainer = Color(0xFF243B37),
+    onSecondaryContainer = Color(0xFFD3E8E2),
+    tertiary = Color(0xFF9BD1AE),
+    onTertiary = Color(0xFF0B2917),
+    tertiaryContainer = Color(0xFF1E4634),
+    onTertiaryContainer = Color(0xFFD5F2DE),
+    error = Color(0xFFF2B8B5),
+    onError = Color(0xFF601410),
+    errorContainer = Color(0xFF8C1D18),
+    onErrorContainer = Color(0xFFF9DEDC),
+    background = PetrolNight,
+    onBackground = Color(0xFFDDE7E4),
+    surface = Color(0xFF131B1D),
+    onSurface = Color(0xFFDDE7E4),
+    surfaceVariant = Color(0xFF1A2427),
+    onSurfaceVariant = Color(0xFFAEBDBA),
+    outline = Color(0xFF788885),
+    outlineVariant = Color(0xFF31413F),
+    surfaceContainerLow = Color(0xFF161F21),
+    surfaceContainer = Color(0xFF1A2427),
+    surfaceContainerHigh = Color(0xFF232E31)
 )
 
 @Composable
 fun CuraTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
     MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
+        colorScheme = if (darkTheme) DarkScheme else LightScheme,
+        typography = CuraTypography,
         content = content
     )
 }

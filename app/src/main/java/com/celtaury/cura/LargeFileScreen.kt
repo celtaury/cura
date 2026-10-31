@@ -1,16 +1,9 @@
 package com.celtaury.cura
 
-import android.Manifest
 import android.app.Activity
-import android.content.ContentUris
-import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,26 +18,33 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,395 +64,342 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
-import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.celtaury.cura.core.MediaItem
+import com.celtaury.cura.core.KeepSafe
+import com.celtaury.cura.core.PermissionGate
+import com.celtaury.cura.core.SavedStats
+import com.celtaury.cura.core.Scanner
+import com.celtaury.cura.core.humanBytes
+import com.celtaury.cura.core.relativeDays
+import com.celtaury.cura.core.rememberDeleteController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class CleanableFile(
-    val id: Long,
-    val displayName: String,
-    val sizeBytes: Long,
-    val uri: Uri
-)
+@Composable
+fun LargeFilesScreen(onBack: () -> Unit) {
+    PermissionGate(
+        title = "Welcome to Cura",
+        description = "We need media access to find the big files hiding in your storage. Nothing is touched without your say-so."
+    ) {
+        LargeFilesContent(onBack)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LargeFilesScreen(onBackClick: () -> Unit) {
-    var hasPermission by remember { mutableStateOf(false) }
+private fun LargeFilesContent(onBack: () -> Unit) {
     val context = LocalContext.current
-    val activity = context as Activity
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
 
-    var files by remember { mutableStateOf<List<CleanableFile>>(emptyList()) }
-    var selectedFileIds by remember { mutableStateOf(setOf<Long>()) }
-    var isScanning by remember { mutableStateOf(false) }
-
+    var files by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var filter by remember { mutableStateOf("all") }
     var previewUri by remember { mutableStateOf<Uri?>(null) }
 
-    val coroutineScope = rememberCoroutineScope()
-
-    // Calculate total size of ALL found files (for the Hero Card)
-    val totalSizeMB = files.sumOf { it.sizeBytes } / (1024 * 1024)
-    // Calculate size of SELECTED files
-    val selectedSizeMB = files.filter { selectedFileIds.contains(it.id) }.sumOf { it.sizeBytes } / (1024 * 1024)
-
-    val deleteLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            selectedFileIds = emptySet()
-            isScanning = true
-            coroutineScope.launch {
-                files = getAllFiles(context)
-                isScanning = false
-            }
-        }
+    suspend fun rescan() {
+        loading = true
+        files = Scanner.largeFiles(context, minBytes = 30L * 1024 * 1024)
+        loading = false
     }
 
-    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        arrayOf(
-            Manifest.permission.READ_MEDIA_IMAGES,
-            Manifest.permission.READ_MEDIA_VIDEO,
-            Manifest.permission.READ_MEDIA_AUDIO
-        )
-    } else {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
+    LaunchedEffect(Unit) { rescan() }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissionsMap ->
-        hasPermission = permissionsMap.values.all { it }
-        if (hasPermission) {
-            isScanning = true
-            coroutineScope.launch {
-                files = getAllFiles(context)
-                isScanning = false
-            }
+    val delete = rememberDeleteController(onCleaned = {
+        val bytes = files.filter { it.uri.toString() in selected }.sumOf { it.sizeBytes }
+        SavedStats.addClean(context, bytes)
+        Toast.makeText(context, "Freed ${humanBytes(bytes)} 🌿", Toast.LENGTH_SHORT).show()
+        scope.launch {
+            selected = emptySet()
+            rescan()
+        }
+    })
+
+    val filtered = files.filter { item ->
+        when (filter) {
+            "video" -> item.mime.startsWith("video/")
+            "image" -> item.mime.startsWith("image/")
+            "audio" -> item.mime.startsWith("audio/")
+            else -> true
         }
     }
+    val selectedUris = files.filter { it.uri.toString() in selected }.map { it.uri }
+    val selectedBytes = files.filter { it.uri.toString() in selected }.sumOf { it.sizeBytes }
 
-    LaunchedEffect(Unit) {
-        val allGranted = permissions.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-        hasPermission = allGranted
-        if (hasPermission) {
-            isScanning = true
-            files = getAllFiles(context)
-            isScanning = false
-        }
-    }
-
-    val requestBulkDelete = {
-        val urisToDelete = files.filter { selectedFileIds.contains(it.id) }.map { it.uri }
-        if (urisToDelete.isNotEmpty()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, urisToDelete)
-                deleteLauncher.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
-            } else {
-                coroutineScope.launch {
-                    withContext(Dispatchers.IO) {
-                        urisToDelete.forEach { uri ->
-                            context.contentResolver.delete(uri, null, null)
-                        }
-                    }
-                    isScanning = true
-                    files = getAllFiles(context)
-                    isScanning = false
-                    selectedFileIds = emptySet()
-                }
-            }
-        }
-    }
-
-    // THE LAYOUT
     Scaffold(
+        containerColor = cs.background,
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Cura", fontWeight = FontWeight.Bold)
-                        Text("Storage Cleaner", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Large Files", fontWeight = FontWeight.Bold)
+                        Text("30 MB and up · swipe to judge",
+                            fontSize = 12.sp, color = cs.onSurfaceVariant)
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
             )
         },
         bottomBar = {
-            if (selectedFileIds.isNotEmpty()) {
+            if (selected.isNotEmpty()) {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = cs.primaryContainer)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("${selectedFileIds.size} files selected", fontWeight = FontWeight.Medium)
-                            Text("$selectedSizeMB MB", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Text("${selected.size} picked", fontWeight = FontWeight.SemiBold)
+                            Text(humanBytes(selectedBytes), fontSize = 12.sp,
+                                color = cs.onPrimaryContainer)
                         }
-                        Button(onClick = requestBulkDelete) {
-                            Text("Clean")
-                        }
+                        Button(
+                            onClick = { delete(selectedUris) },
+                            colors = ButtonDefaults.buttonColors(containerColor = cs.primary)
+                        ) { Text("Clean 🧹") }
                     }
                 }
             }
         }
-    ) { paddingValues ->
+    ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 16.dp)
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
         ) {
-            if (!hasPermission) {
-                Spacer(modifier = Modifier.height(100.dp))
-                Text(
-                    "Welcome to Cura",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "We need access to your storage to find large files and help you clean them.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(32.dp))
-                Button(
-                    onClick = { permissionLauncher.launch(permissions) },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
-                    shape = MaterialTheme.shapes.large
-                ) {
-                    Text("Grant Access", fontSize = 16.sp)
+            // Filter chips
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(listOf("all" to "All", "image" to "Photos", "video" to "Videos",
+                    "audio" to "Audio")) { (key, label) ->
+                    FilterChip(
+                        selected = filter == key,
+                        onClick = { filter = key },
+                        label = { Text(label) }
+                    )
                 }
-            } else if (isScanning) {
-                Spacer(modifier = Modifier.height(100.dp))
-                CircularProgressIndicator(modifier = Modifier.size(48.dp).align(Alignment.CenterHorizontally))
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Analyzing storage...", modifier = Modifier.align(Alignment.CenterHorizontally))
+            }
+            Spacer(Modifier.height(10.dp))
+
+            // Hero card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = cs.secondaryContainer)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Large files found", style = MaterialTheme.typography.titleSmall,
+                        color = cs.onSecondaryContainer)
+                    Text(
+                        "${filtered.size} files · ${humanBytes(filtered.sumOf { it.sizeBytes })}",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        "Swipe right 🛡️ to keep safe · swipe left 🧹 to pick for cleaning",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = cs.onSecondaryContainer
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+
+            if (loading) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(color = cs.primary)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Analyzing storage…", color = cs.onSurfaceVariant)
+                }
+            } else if (filtered.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("🌿", fontSize = 48.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text("No large files here. You're clean!",
+                        color = cs.onSurfaceVariant)
+                }
             } else {
-                // THE HERO CARD (The "Proven Model" element, but honest)
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
-                        Text("Large Files Found", style = MaterialTheme.typography.titleMedium)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "$totalSizeMB MB",
-                            style = MaterialTheme.typography.displayLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                    items(filtered, key = { it.uri.toString() }) { item ->
+                        LargeFileRow(
+                            item = item,
+                            checked = item.uri.toString() in selected,
+                            onToggle = {
+                                val key = item.uri.toString()
+                                selected = if (key in selected) selected - key else selected + key
+                            },
+                            onKeep = {
+                                KeepSafe.add(context, item.uri)
+                                files = files.filterNot { it.uri == item.uri }
+                                selected = selected - item.uri.toString()
+                                Toast.makeText(context, "Kept safe 🛡️", Toast.LENGTH_SHORT).show()
+                            },
+                            onPreview = { previewUri = item.uri }
                         )
-                        Text(
-                            "Tap files below to select them for cleaning.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
+                        HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.4f))
                     }
-                }
-
-                if (files.isEmpty()) {
-                    Spacer(modifier = Modifier.height(50.dp))
-                    Text("No large files found. You're clean!", modifier = Modifier.align(Alignment.CenterHorizontally))
-                } else {
-                    Text("Review Files", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp))
-
-                    // THE CARD WRAPS THE LAZY COLUMN DIRECTLY
-                    Card(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        shape = MaterialTheme.shapes.large,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(files) { file ->
-                                val isSelected = selectedFileIds.contains(file.id)
-                                val sizeInMB = file.sizeBytes / (1024 * 1024)
-                                val isVideo = file.displayName.endsWith(".mp4") || file.displayName.endsWith(".mov") || file.displayName.endsWith(".mkv")
-
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            if (isSelected) selectedFileIds = selectedFileIds - file.id
-                                            else selectedFileIds = selectedFileIds + file.id
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // THE THUMBNAIL (Using Coil)
-                                    AsyncImage(
-                                        model = file.uri,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .clip(RoundedCornerShape(12.dp)),
-                                        contentScale = ContentScale.Crop
-                                    )
-
-                                    // Little video play icon overlay if it's a video
-                                    if (isVideo) {
-                                        Box(modifier = Modifier
-                                            .size(56.dp)
-                                            .clickable {
-                                                var itemVideoUri = file.uri
-                                                previewUri = itemVideoUri
-                                            }, contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.PlayCircle,
-                                                contentDescription = null,
-                                                tint = Color.White.copy(alpha = 0.8f),
-                                                modifier = Modifier.size(32.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.width(16.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = file.displayName,
-                                            maxLines = 1,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = "$sizeInMB MB",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    Checkbox(
-                                        checked = isSelected,
-                                        onCheckedChange = {
-                                            if (isSelected) selectedFileIds = selectedFileIds - file.id
-                                            else selectedFileIds = selectedFileIds + file.id
-                                        }
-                                    )
-                                }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                            }
-                            // Space for the bottom bar so the last item isn't hidden
-                            item { Spacer(modifier = Modifier.height(100.dp)) }
-                        }
-                    }
+                    item { Spacer(Modifier.height(90.dp)) }
                 }
             }
         }
     }
-    // SHOW THE VIDEO PREVIEW SHEET IF A URI IS SELECTED
+
     previewUri?.let { uri ->
-        VideoPreviewSheet(videoUri = uri) {
-            previewUri = null // This closes the sheet
+        VideoPreviewSheet(videoUri = uri, onDismiss = { previewUri = null })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LargeFileRow(
+    item: MediaItem,
+    checked: Boolean,
+    onToggle: () -> Unit,
+    onKeep: () -> Unit,
+    onPreview: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val isVideo = item.mime.startsWith("video/")
+
+    // rememberUpdatedState keeps actions fresh inside the dismiss state lambda
+    val currentToggle by rememberUpdatedState(onToggle)
+    val currentKeep by rememberUpdatedState(onKeep)
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> { currentKeep(); false }
+                SwipeToDismissBoxValue.EndToStart -> { currentToggle(); false }
+                else -> false
+            }
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = true,
+        enableDismissFromEndToStart = true,
+        backgroundContent = {
+            Box(
+                modifier = Modifier.fillMaxSize()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        when (dismissState.targetValue) {
+                            SwipeToDismissBoxValue.StartToEnd -> cs.tertiaryContainer
+                            else -> cs.errorContainer
+                        }
+                    ),
+                contentAlignment = if (dismissState.targetValue ==
+                    SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart
+                else Alignment.CenterEnd
+            ) {
+                Text(
+                    if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd)
+                        "🛡️ Keep safe" else "🧹 Pick",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp)
+                )
+            }
+        }
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize()
+                .clip(RoundedCornerShape(16.dp))
+                .background(cs.surface)
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Thumbnail (play icon ON the image now — fixed overlay)
+            Box(modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))) {
+                AsyncImage(
+                    model = item.uri,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                if (isVideo) {
+                    Box(
+                        modifier = Modifier.fillMaxSize()
+                            .clickable(onClick = onPreview),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.PlayCircle,
+                            contentDescription = "Preview video",
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.displayName, maxLines = 1, fontWeight = FontWeight.Medium)
+                Text(
+                    "${humanBytes(item.sizeBytes)} · ${relativeDays(item.dateAddedSec)}",
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant
+                )
+            }
+            Checkbox(checked = checked, onCheckedChange = { onToggle() })
         }
     }
 }
 
-// VideoPreviewSheet.kt
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun VideoPreviewSheet(
-    videoUri: Uri,
-    onDismiss: () -> Unit
-) {
+private fun VideoPreviewSheet(videoUri: Uri, onDismiss: () -> Unit) {
     val context = LocalContext.current
-
-    // 1. Remember the ExoPlayer instance
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(videoUri))
+            setMediaItem(ExoMediaItem.fromUri(videoUri))
             prepare()
             playWhenReady = true
         }
     }
-
-    // 2. Release the player when the sheet closes (CRITICAL for memory)
     DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer.release()
-        }
+        onDispose { exoPlayer.release() }
     }
-
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text("Preview", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 3. The PlayerView
+            Spacer(Modifier.height(14.dp))
             AndroidView(
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         player = exoPlayer
-                        useController = true // Shows play/pause/seek bar
+                        useController = true
                     }
                 },
-                modifier = Modifier.fillMaxWidth().aspectRatio(16f/9f)
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
             )
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
             Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text("Close Preview")
             }
+            Spacer(Modifier.height(20.dp))
         }
-    }
-}
-
-suspend fun getAllFiles(context: Context): List<CleanableFile> {
-    return withContext(Dispatchers.IO) {
-        val fileCollection = mutableListOf<CleanableFile>()
-        val collections = mutableListOf<Uri>()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            collections.add(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL))
-            collections.add(MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL))
-        } else {
-            collections.add(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-            collections.add(MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
-        }
-
-        for (contentUri in collections) {
-            val projections = arrayOf(
-                MediaStore.MediaColumns._ID,
-                MediaStore.MediaColumns.DISPLAY_NAME,
-                MediaStore.MediaColumns.SIZE
-            )
-
-            // CHANGE THIS BACK TO 50 WHEN YOU ARE READY TO SHIP!
-            val selection = "${MediaStore.MediaColumns.SIZE} > ?"
-            val selectionArgs = arrayOf((50 * 1024 * 1024).toString())
-            val sortOrder = "${MediaStore.MediaColumns.SIZE} DESC"
-
-            context.contentResolver.query(contentUri, projections, selection, selectionArgs, sortOrder)?.use { cursor ->
-                if (cursor.count > 0) {
-                    val idIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                    val displayNameIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                    val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-
-                    while (cursor.moveToNext()) {
-                        val id = cursor.getLong(idIndex)
-                        val displayName = cursor.getString(displayNameIndex) ?: "Unknown"
-                        val sizeBytes = cursor.getLong(sizeIndex)
-                        val uri = ContentUris.withAppendedId(contentUri, id)
-                        fileCollection.add(CleanableFile(id, displayName, sizeBytes, uri))
-                    }
-                }
-            }
-        }
-        fileCollection
     }
 }
