@@ -99,7 +99,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                         tint = cs.error)
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        "Swipe right on any file in Large Files — or keep a discovery on the home screen — and it lands here. Cura will never suggest it for cleaning.",
+                        "Swipe right 🛡️ on any card in a review deck — or keep a discovery on the home screen — and it lands here. Cura will never suggest it for cleaning.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
@@ -115,7 +115,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     Text("Nothing protected yet", color = cs.onSurfaceVariant)
                     Text(
-                        "Swipe right on a file to keep it safe forever",
+                        "Swipe right 🛡️ on a card to keep it safe forever",
                         fontSize = 12.sp, color = cs.onSurfaceVariant
                     )
                 }

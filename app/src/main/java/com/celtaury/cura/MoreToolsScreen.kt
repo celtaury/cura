@@ -154,7 +154,7 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
                 Column(Modifier.fillMaxWidth().padding(20.dp)) {
                     Text("CURA", fontFamily = InterBlack, fontSize = 18.sp)
                     Text(
-                        "Storage care, not storage stress. v0.5 · concept build.",
+                        "Storage care, not storage stress. v0.6 · flow build.",
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant
                     )

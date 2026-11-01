@@ -32,6 +32,37 @@ import androidx.core.content.ContextCompat
  * - Android 12-: READ_EXTERNAL_STORAGE
  * Auto-asks on entry; shows a friendly intro with a retry button if refused.
  */
+
+private val partialPerm = "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+
+/** The exact permission set Cura needs. Shared by every gate, banner and onboarding. */
+fun mediaPermissions(): Array<String> =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_AUDIO
+        )
+    } else {
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
+/** True when Cura can read media (full OR the Android-14 partial selection). */
+fun hasMediaAccess(context: android.content.Context): Boolean {
+    val visualSelected = ContextCompat.checkSelfPermission(
+        context, partialPerm
+    ) == PackageManager.PERMISSION_GRANTED
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES)
+            == PackageManager.PERMISSION_GRANTED || visualSelected) &&
+            (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO)
+                == PackageManager.PERMISSION_GRANTED || visualSelected)
+    } else {
+        (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+            == PackageManager.PERMISSION_GRANTED)
+    }
+}
+
 @Composable
 fun PermissionGate(
     title: String,
@@ -42,47 +73,16 @@ fun PermissionGate(
     var granted by remember { mutableStateOf(false) }
     var askedOnce by remember { mutableStateOf(false) }
 
-    val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        arrayOf(
-            Manifest.permission.READ_MEDIA_IMAGES,
-            Manifest.permission.READ_MEDIA_VIDEO,
-            Manifest.permission.READ_MEDIA_AUDIO
-        )
-    } else {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
-    val partialPerm = "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
+    val perms = mediaPermissions()
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { map ->
-        val visualSelected = map[partialPerm] == true
-        val imagesOk = map[Manifest.permission.READ_MEDIA_IMAGES] == true || visualSelected
-        val videoOk = map[Manifest.permission.READ_MEDIA_VIDEO] == true || visualSelected
-        granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            imagesOk && videoOk
-        } else {
-            map[Manifest.permission.READ_EXTERNAL_STORAGE] == true
-        }
+    ) { _ ->
+        granted = hasMediaAccess(context)
     }
 
     LaunchedEffect(Unit) {
-        val visualSelected = ContextCompat.checkSelfPermission(
-            context, partialPerm
-        ) == PackageManager.PERMISSION_GRANTED
-        val imagesOk = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.READ_MEDIA_IMAGES
-        ) == PackageManager.PERMISSION_GRANTED || visualSelected
-        val videoOk = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.READ_MEDIA_VIDEO
-        ) == PackageManager.PERMISSION_GRANTED || visualSelected
-        granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            imagesOk && videoOk
-        } else {
-            ContextCompat.checkSelfPermission(
-                context, Manifest.permission.READ_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
-        }
+        granted = hasMediaAccess(context)
         if (!granted) {
             askedOnce = true
             launcher.launch(perms)

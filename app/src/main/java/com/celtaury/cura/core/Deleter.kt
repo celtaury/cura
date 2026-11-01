@@ -27,13 +27,16 @@ import kotlinx.coroutines.withContext
  *   delete(listOfUris)
  */
 @Composable
-fun rememberDeleteController(onCleaned: () -> Unit): (List<Uri>) -> Unit {
+fun rememberDeleteController(
+    onCleaned: () -> Unit,
+    onCancelled: () -> Unit = {}
+): (List<Uri>) -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) onCleaned()
+        if (result.resultCode == Activity.RESULT_OK) onCleaned() else onCancelled()
     }
 
     return remember(onCleaned) {

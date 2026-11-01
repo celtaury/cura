@@ -1,12 +1,15 @@
 package com.celtaury.cura
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -26,13 +30,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Screenshot
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,9 +56,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -64,7 +69,9 @@ import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
+import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.humanBytes
+import com.celtaury.cura.core.mediaPermissions
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberDeleteController
 import com.celtaury.cura.ui.theme.AccentOrange
@@ -94,6 +101,11 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
     var savedBytes by remember { mutableStateOf(0L) }
     var forgotten by remember { mutableStateOf<MediaItem?>(null) }
     var sheetItem by remember { mutableStateOf<MediaItem?>(null) }
+    var mediaOk by remember { mutableStateOf(hasMediaAccess(context)) }
+
+    val grantLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> mediaOk = hasMediaAccess(context) }
 
     LaunchedEffect(Unit) {
         savedBytes = SavedStats.savedBytes(context)
@@ -132,6 +144,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
+                .padding(bottom = 150.dp)   // room for the peeking card
         ) {
             Spacer(Modifier.height(14.dp))
 
@@ -148,9 +161,41 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     letterSpacing = 1.sp,
                     color = cs.onBackground
                 )
-                IconButton(onClick = { onNavigate("more") }) {
-                    Icon(Icons.Default.MoreHoriz, contentDescription = "More tools",
+                IconButton(onClick = { onNavigate("settings") }) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings",
                         tint = cs.onBackground)
+                }
+            }
+
+            // ── Grant banner (persists until access is given) ──
+            if (!mediaOk) {
+                Spacer(Modifier.height(8.dp))
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = cs.errorContainer)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Photo access needed",
+                                fontWeight = FontWeight.Bold,
+                                color = cs.onErrorContainer)
+                            Text(
+                                "Cura can't see any files yet — everything stays empty.",
+                                fontSize = 12.sp, color = cs.onErrorContainer
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Button(
+                            onClick = { grantLauncher.launch(mediaPermissions()) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = cs.onErrorContainer,
+                                contentColor = cs.errorContainer
+                            )
+                        ) { Text("Grant") }
+                    }
                 }
             }
 
@@ -244,7 +289,52 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(18.dp))
 
-            // ── Quick Clean (Figma pill: white + green border) ──
+            // ── SUGGESTIONS — the big hero tile (UX v2 decision 4) ──
+            Card(
+                modifier = Modifier.fillMaxWidth()
+                    .height(120.dp)
+                    .clickable { onNavigate("suggestions") },
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = cs.primaryContainer)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(cs.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = cs.onPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Suggestions",
+                            fontSize = 21.sp,
+                            fontFamily = InterBlack,
+                            color = cs.onPrimaryContainer
+                        )
+                        Text(
+                            "Smart picks for today — large files, old media & more",
+                            fontSize = 13.sp,
+                            color = cs.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ── Quick Clean pill (Figma) ──
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.62f)
@@ -343,19 +433,13 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(24.dp))
 
-            // ── All features grid (2 columns) ──
+            // ── Secondary tiles ──
             val tiles = listOf(
-                FeatureTile("Large Files", Icons.Default.CleaningServices, "large_files",
+                FeatureTile("Review Gallery", Icons.Default.Image, "deck_gallery",
                     cs.primaryContainer, cs.primary),
-                FeatureTile("Old Screenshots", Icons.Default.Screenshot, "screenshots",
-                    cs.secondaryContainer, cs.onSecondaryContainer),
-                FeatureTile("Organize Images", Icons.Default.Image, "organize",
-                    cs.tertiaryContainer, cs.onTertiaryContainer),
                 FeatureTile("Keep-safe", Icons.Default.Favorite, "keepsafe",
                     cs.errorContainer, cs.error),
                 FeatureTile("More Tools", Icons.Default.MoreHoriz, "more",
-                    cs.surfaceVariant, cs.onSurfaceVariant),
-                FeatureTile("Coming soon", Icons.Default.AutoAwesome, "soon",
                     cs.surfaceVariant, cs.onSurfaceVariant)
             )
             tiles.chunked(2).forEach { rowTiles ->
@@ -368,11 +452,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                             tile = tile,
                             modifier = Modifier.weight(1f)
                         ) {
-                            if (tile.route == "soon") {
-                                Toast.makeText(context, "On the roadmap 🚧", Toast.LENGTH_SHORT).show()
-                            } else {
-                                onNavigate(tile.route)
-                            }
+                            onNavigate(tile.route)
                         }
                     }
                     if (rowTiles.size == 1) Spacer(Modifier.weight(1f))
@@ -380,6 +460,45 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
             }
 
             Spacer(Modifier.height(28.dp))
+        }
+
+        // ── Peeking card: swipe up to enter the gallery deck (UX v2 decision 5) ──
+        var dragUp by remember { mutableStateOf(0f) }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp)
+                .fillMaxWidth(0.82f)
+                .height(62.dp)
+                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                .background(cs.surface)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onVerticalDrag = { change, amount ->
+                            change.consume()
+                            dragUp += amount
+                            if (dragUp < -110f) {
+                                dragUp = 0f
+                                onNavigate("deck_gallery")
+                            }
+                        },
+                        onDragEnd = { dragUp = 0f },
+                        onDragCancel = { dragUp = 0f }
+                    )
+                }
+                .clickable { onNavigate("deck_gallery") },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("⌃", fontSize = 15.sp, color = cs.onSurfaceVariant)
+                Text(
+                    "Swipe up to review your gallery",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onSurfaceVariant
+                )
+            }
         }
     }
 

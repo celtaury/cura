@@ -174,16 +174,88 @@ object Scanner {
             }.filter { !isProtected(context, it) }
         }
 
-    /** WhatsApp / social media files, bucketed for the Social Cleaner. */
+    /**
+     * WhatsApp media only (v1 scope — Telegram/Instagram land in v1.5/v2).
+     * WhatsApp keeps its files under Android/media/com.whatsapp, which MediaStore
+     * indexes for us, so plain media permissions are enough.
+     */
     suspend fun whatsappMedia(context: Context): List<MediaItem> =
         withContext(Dispatchers.IO) {
-            val kinds = listOf("images", "video", "audio")
+            val kinds = listOf("images", "video", "audio", "files")
             val all = mutableListOf<MediaItem>()
             for (k in kinds) all += query(context, mediaUri(k))
             all.filter {
                 val p = it.path.lowercase()
-                p.contains("whatsapp") || p.contains("telegram") || p.contains("instagram")
+                p.contains("whatsapp")
             }.filter { !isProtected(context, it) }
+                .distinctBy { it.uri }
+        }
+
+    /** Social Cleaner type tab. Stickers first so they never masquerade as Images. */
+    fun socialTypeOf(item: MediaItem): String {
+        val p = item.path.lowercase()
+        val n = item.displayName.lowercase()
+        return when {
+            p.contains("sticker") || (n.endsWith(".webp") && p.contains("whatsapp")) -> "Stickers"
+            item.mime.startsWith("image/") -> "Images"
+            item.mime.startsWith("video/") -> "Videos"
+            item.mime.startsWith("audio/") -> "Audio"
+            else -> "Docs"
+        }
+    }
+
+    /**
+     * Old media deck: photos & videos untouched for [minAgeDays]+.
+     * Excludes screenshots (they have their own deck) and chat-app folders
+     * (the Social Cleaner owns those) — one file, one surface.
+     */
+    suspend fun oldMedia(context: Context, minAgeDays: Int = 60): List<MediaItem> =
+        withContext(Dispatchers.IO) {
+            val cutoff = System.currentTimeMillis() / 1000 - minAgeDays * 86400L
+            val kinds = listOf("images", "video")
+            val all = mutableListOf<MediaItem>()
+            for (k in kinds) {
+                all += query(
+                    context,
+                    mediaUri(k),
+                    selection = "${MediaStore.MediaColumns.DATE_ADDED} < ? AND ${MediaStore.MediaColumns.SIZE} > 0",
+                    args = arrayOf(cutoff.toString())
+                )
+            }
+            all.filter {
+                val p = it.path.lowercase()
+                val n = it.displayName.lowercase()
+                val isShot = p.contains("screenshot") || n.startsWith("screenshot") ||
+                    n.startsWith("screen-") || p.contains("screenRecorder")
+                val isSocial = p.contains("whatsapp") || p.contains("telegram") ||
+                    p.contains("instagram")
+                !isShot && !isSocial
+            }.filter { !isProtected(context, it) }
+                .distinctBy { it.uri }
+                .sortedBy { it.dateAddedSec }   // oldest first — the dusty stuff leads
+                .take(600)
+        }
+
+    /**
+     * The gallery review deck (dashboard peek-card): everything, oldest first.
+     * Capped at 500 — a deck is for deciding, not for marathons.
+     */
+    suspend fun galleryDeck(context: Context): List<MediaItem> =
+        withContext(Dispatchers.IO) {
+            val kinds = listOf("images", "video")
+            val all = mutableListOf<MediaItem>()
+            for (k in kinds) {
+                all += query(
+                    context,
+                    mediaUri(k),
+                    selection = "${MediaStore.MediaColumns.SIZE} > 0",
+                    order = "${MediaStore.MediaColumns.DATE_ADDED} ASC"
+                )
+            }
+            all.filter { !isProtected(context, it) }
+                .distinctBy { it.uri }
+                .sortedBy { it.dateAddedSec }
+                .take(500)
         }
 
     /** Zero-byte files found in visible collections (capped — some devices have thousands). */
