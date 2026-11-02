@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -272,14 +273,25 @@ private fun DeckContent(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
                 )
                 if (phase == "deck" && items.isNotEmpty()) {
-                    LinearProgressIndicator(
-                        progress = { index.toFloat() / items.size },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        color = cs.primary,
-                        trackColor = cs.surfaceVariant
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        LinearProgressIndicator(
+                            progress = { index.toFloat() / items.size },
+                            modifier = Modifier.weight(1f),
+                            color = cs.primary,
+                            trackColor = cs.surfaceVariant
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            ("${index + 1} / ${items.size}" +
+                                    if (queue.isNotEmpty()) " · ${queue.size} queued" else ""),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
                     Spacer(Modifier.height(6.dp))
                 }
             }
@@ -371,13 +383,15 @@ private fun DeckPhase(
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
         }
-        Text(
-            "${index + 1} of ${items.size}" + if (queueSize > 0) " · $queueSize queued 🧹" else "",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = cs.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 20.dp)
-        )
+        if (queueSize > 0) {
+            Text(
+                "$queueSize queued 🧹",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
+        }
         Spacer(Modifier.height(10.dp))
 
         Box(

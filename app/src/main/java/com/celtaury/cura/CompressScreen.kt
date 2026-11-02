@@ -69,7 +69,7 @@ import com.celtaury.cura.core.PermissionGate
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.humanBytes
-import com.celtaury.cura.core.rememberDeleteController
+import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.theme.AccentOrange
 import com.celtaury.cura.ui.theme.AccentOrangeContainer
 import com.celtaury.cura.ui.theme.AccentOrangeContainerDark
@@ -159,7 +159,7 @@ private fun CompressContent(onBack: () -> Unit) {
 
     val selectedItems = photos.filter { it.uri.toString() in selected }
 
-    val delete = rememberDeleteController(
+    val delete = rememberConfirmableDelete(
         onCleaned = {
             val saved = pendingReplace?.second ?: 0L
             SavedStats.addClean(context, saved)
@@ -208,7 +208,11 @@ private fun CompressContent(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("${selectedItems.size} photos", fontWeight = FontWeight.SemiBold)
+                            val totalBytes = selectedItems.sumOf { it.sizeBytes }
+                            Text(
+                                "${selectedItems.size} photos · ${humanBytes(totalBytes)}",
+                                fontWeight = FontWeight.SemiBold
+                            )
                             Text(
                                 "with ${preset.label} → originals go to Trash",
                                 fontSize = 12.sp, color = onOrange
@@ -229,14 +233,14 @@ private fun CompressContent(onBack: () -> Unit) {
                                 progressTotal = selectedItems.size
                                 val items = selectedItems
                                 scope.launch {
-                                    val savedPairs = mutableListOf<Pair<android.net.Uri, Long>>()
+                                    val savedPairs = mutableListOf<Pair<MediaItem, Long>>()
                                     withContext(Dispatchers.IO) {
                                         items.forEachIndexed { i, item ->
                                             val saved = compressImage(
                                                 context, item, preset.quality, preset.maxEdge
                                             )
                                             if (saved != null && saved > 0) {
-                                                savedPairs.add(item.uri to saved)
+                                                savedPairs.add(item to saved)
                                             }
                                             progressDone = i + 1
                                         }
@@ -250,7 +254,7 @@ private fun CompressContent(onBack: () -> Unit) {
                                         ).show()
                                     } else {
                                         val total = savedPairs.sumOf { it.second }
-                                        pendingReplace = savedPairs.map { it.first } to total
+                                        pendingReplace = savedPairs.map { it.first.uri } to total
                                         delete(savedPairs.map { it.first })
                                     }
                                 }
@@ -387,12 +391,24 @@ private fun CompressContent(onBack: () -> Unit) {
                 }
                 // ── Photo list ──
                 item {
-                    Text(
-                        "Photos 1 MB and bigger, biggest first",
-                        fontSize = 12.sp,
-                        color = cs.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Photos 1 MB and bigger, biggest first",
+                            fontSize = 12.sp,
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = {
+                            selected = photos.map { it.uri.toString() }.toSet()
+                        }) { Text("All", fontSize = 12.sp) }
+                        TextButton(onClick = {
+                            selected = emptySet()
+                        }) { Text("None", fontSize = 12.sp) }
+                    }
                 }
                 items(photos, key = { it.uri.toString() }) { item ->
                     val checked = item.uri.toString() in selected
