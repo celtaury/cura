@@ -5,4 +5,4 @@
 - Uhhhh remember to make the earning transparent, very impotant
 
 current structure
-<img src=cura_v3_app_map.png>
+<img src=/Images/cura_v3_app_map.png>
