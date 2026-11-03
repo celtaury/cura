@@ -1,10 +1,16 @@
 package com.celtaury.cura
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,12 +39,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -61,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -73,18 +80,22 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.celtaury.cura.core.DeleteQueuePrefs
 import com.celtaury.cura.core.JunkCategory
 import com.celtaury.cura.core.KeepSafe
+import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
+import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import com.celtaury.cura.ui.theme.InterBlack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,7 +108,8 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     var scanStatus by remember { mutableStateOf("Warming up…") }
     var categories by remember { mutableStateOf<List<JunkCategory>>(emptyList()) }
     var selectedCategoryKey by remember { mutableStateOf("all") }
-    var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var queuedUris by remember { mutableStateOf(DeleteQueuePrefs.getQueue(context, "quick_clean")) }
+    var previewItem by remember { mutableStateOf<MediaItem?>(null) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -135,11 +147,16 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
         phase = "ready"
     }
 
+    // Persist delete queue so selections survive app exits
+    LaunchedEffect(queuedUris) {
+        DeleteQueuePrefs.setQueue(context, "quick_clean", queuedUris)
+    }
+
     // Confirmable delete sheet before system deletion
     val confirmDelete = rememberConfirmableDelete(
         onCleaned = {
             val allItems = categories.flatMap { it.items }
-            val deletedItems = allItems.filter { it.uri.toString() in selectedUris }
+            val deletedItems = allItems.filter { it.uri.toString() in queuedUris }
             val freedBytes = deletedItems.sumOf { it.sizeBytes }
 
             if (freedBytes > 0L) {
@@ -147,10 +164,11 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             }
 
             categories = categories.map { cat ->
-                cat.copy(items = cat.items.filter { it.uri.toString() !in selectedUris })
+                cat.copy(items = cat.items.filter { it.uri.toString() !in queuedUris })
             }.filter { it.items.isNotEmpty() }
 
-            selectedUris = emptySet()
+            queuedUris = emptySet()
+            DeleteQueuePrefs.clear(context, "quick_clean")
             Toast.makeText(context, "Cleaned successfully 🌿", Toast.LENGTH_SHORT).show()
         }
     )
@@ -166,10 +184,10 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 
     val totalItems = categories.sumOf { it.items.size }
     val totalBytes = categories.sumOf { it.totalBytes }
-    val selectedItemsList = remember(displayedItems, selectedUris) {
-        displayedItems.filter { it.uri.toString() in selectedUris }
+    val queuedItemsList = remember(displayedItems, queuedUris) {
+        displayedItems.filter { it.uri.toString() in queuedUris }
     }
-    val selectedBytes = selectedItemsList.sumOf { it.sizeBytes }
+    val queuedBytes = queuedItemsList.sumOf { it.sizeBytes }
 
     Scaffold(
         containerColor = cs.background,
@@ -183,7 +201,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                             fontFamily = InterBlack
                         )
                         Text(
-                            "Swipe left to delete · swipe right to save",
+                            "Tap thumbnail to preview · swipe left to queue delete",
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant
                         )
@@ -331,24 +349,24 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                 color = cs.onSurface
                                             )
                                             Text(
-                                                "${humanBytes(totalBytes)} recoverable storage",
+                                                "${humanBytes(totalBytes)} recoverable · ${queuedUris.size} queued (saved)",
                                                 fontSize = 12.sp,
-                                                color = cs.onSurfaceVariant
+                                                color = if (queuedUris.isNotEmpty()) cs.error else cs.onSurfaceVariant
                                             )
                                         }
                                         OutlinedButton(
                                             onClick = {
-                                                selectedUris = if (selectedUris.size == displayedItems.size) {
+                                                queuedUris = if (queuedUris.size == displayedItems.size) {
                                                     emptySet()
                                                 } else {
                                                     displayedItems.map { it.uri.toString() }.toSet()
                                                 }
                                             },
                                             shape = CircleShape,
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                                         ) {
                                             Text(
-                                                if (selectedUris.size == displayedItems.size) "Deselect All" else "Select All",
+                                                if (queuedUris.size == displayedItems.size) "Clear Queue" else "Queue All",
                                                 fontSize = 12.sp
                                             )
                                         }
@@ -357,20 +375,24 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 
                                 Spacer(Modifier.height(12.dp))
 
-                                // ── Items List with Swipe Left to Delete / Right to Save ──
+                                // ── Items List with Swipe Left to Queue Delete / Right to Save ──
                                 LazyColumn(
                                     modifier = Modifier.weight(1f),
                                     verticalArrangement = Arrangement.spacedBy(10.dp),
-                                    contentPadding = PaddingValues(bottom = 90.dp)
+                                    contentPadding = PaddingValues(bottom = 96.dp)
                                 ) {
                                     items(displayedItems, key = { it.uri.toString() }) { item ->
-                                        val isSelected = item.uri.toString() in selectedUris
+                                        val isQueued = item.uri.toString() in queuedUris
 
                                         SwipeActionItem(
+                                            isQueued = isQueued,
                                             onSwipeLeft = {
-                                                // Swipe Left: trigger single-item confirmable delete
-                                                selectedUris = selectedUris + item.uri.toString()
-                                                confirmDelete(listOf(item))
+                                                // Swipe Left: add to delete queue (or toggle off if already queued)
+                                                queuedUris = if (isQueued) {
+                                                    queuedUris - item.uri.toString()
+                                                } else {
+                                                    queuedUris + item.uri.toString()
+                                                }
                                             },
                                             onSwipeRight = {
                                                 // Swipe Right: Save/Never suggest again
@@ -379,7 +401,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                 categories = categories.map { cat ->
                                                     cat.copy(items = cat.items.filter { it.uri != item.uri })
                                                 }.filter { it.items.isNotEmpty() }
-                                                selectedUris = selectedUris - item.uri.toString()
+                                                queuedUris = queuedUris - item.uri.toString()
                                                 Toast.makeText(
                                                     context,
                                                     "Saved to Keep-safe 🛡️",
@@ -387,27 +409,41 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                 ).show()
                                             }
                                         ) {
+                                            val animatedBgColor by animateColorAsState(
+                                                targetValue = if (isQueued)
+                                                    cs.errorContainer.copy(alpha = 0.35f)
+                                                else
+                                                    cs.surface,
+                                                animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
+                                                label = "qc_cardBgColor"
+                                            )
+                                            val animatedBorderColor by animateColorAsState(
+                                                targetValue = if (isQueued)
+                                                    cs.error.copy(alpha = 0.65f)
+                                                else
+                                                    cs.outlineVariant.copy(alpha = 0.35f),
+                                                animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
+                                                label = "qc_cardBorderColor"
+                                            )
+                                            val animatedCornerRadius by animateDpAsState(
+                                                targetValue = if (isQueued) 22.dp else 18.dp,
+                                                animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
+                                                label = "qc_cardCornerRadius"
+                                            )
+
                                             Card(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .clickable {
-                                                        selectedUris = if (isSelected) {
-                                                            selectedUris - item.uri.toString()
+                                                        queuedUris = if (isQueued) {
+                                                            queuedUris - item.uri.toString()
                                                         } else {
-                                                            selectedUris + item.uri.toString()
+                                                            queuedUris + item.uri.toString()
                                                         }
                                                     },
-                                                shape = RoundedCornerShape(18.dp),
-                                                colors = CardDefaults.cardColors(
-                                                    containerColor = if (isSelected)
-                                                        cs.primaryContainer.copy(alpha = 0.35f)
-                                                    else cs.surface
-                                                ),
-                                                border = BorderStroke(
-                                                    1.dp,
-                                                    if (isSelected) cs.primary.copy(alpha = 0.5f)
-                                                    else cs.outlineVariant.copy(alpha = 0.35f)
-                                                )
+                                                shape = RoundedCornerShape(animatedCornerRadius),
+                                                colors = CardDefaults.cardColors(containerColor = animatedBgColor),
+                                                border = BorderStroke(1.dp, animatedBorderColor)
                                             ) {
                                                 Row(
                                                     modifier = Modifier
@@ -415,19 +451,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                         .padding(12.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Checkbox(
-                                                        checked = isSelected,
-                                                        onCheckedChange = { checked ->
-                                                            selectedUris = if (checked) {
-                                                                selectedUris + item.uri.toString()
-                                                            } else {
-                                                                selectedUris - item.uri.toString()
-                                                            }
-                                                        }
-                                                    )
-                                                    Spacer(Modifier.width(8.dp))
-
-                                                    // Thumbnail / Icon
+                                                    // Thumbnail (clickable for instant Apple Quick Look preview)
                                                     val isMedia = item.mime.startsWith("image/") ||
                                                         item.mime.startsWith("video/")
                                                     if (isMedia) {
@@ -435,16 +459,18 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                             model = item.uri,
                                                             contentDescription = item.displayName,
                                                             modifier = Modifier
-                                                                .size(54.dp)
-                                                                .clip(RoundedCornerShape(12.dp)),
+                                                                .size(56.dp)
+                                                                .clip(RoundedCornerShape(14.dp))
+                                                                .clickable { previewItem = item },
                                                             contentScale = ContentScale.Crop
                                                         )
                                                     } else {
                                                         Box(
                                                             modifier = Modifier
-                                                                .size(54.dp)
-                                                                .clip(RoundedCornerShape(12.dp))
-                                                                .background(cs.surfaceVariant),
+                                                                .size(56.dp)
+                                                                .clip(RoundedCornerShape(14.dp))
+                                                                .background(cs.surfaceVariant)
+                                                                .clickable { previewItem = item },
                                                             contentAlignment = Alignment.Center
                                                         ) {
                                                             Icon(
@@ -455,7 +481,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                         }
                                                     }
 
-                                                    Spacer(Modifier.width(12.dp))
+                                                    Spacer(Modifier.width(14.dp))
 
                                                     Column(Modifier.weight(1f)) {
                                                         Text(
@@ -466,12 +492,46 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                             overflow = TextOverflow.Ellipsis,
                                                             color = cs.onSurface
                                                         )
-                                                        Spacer(Modifier.height(2.dp))
+                                                        Spacer(Modifier.height(3.dp))
                                                         Text(
                                                             "${humanBytes(item.sizeBytes)} · added ${relativeDays(item.dateAddedSec)}",
                                                             fontSize = 12.sp,
                                                             color = cs.onSurfaceVariant
                                                         )
+                                                    }
+
+                                                    // Material 3 Expressive Queued Badge
+                                                    AnimatedVisibility(
+                                                        visible = isQueued,
+                                                        enter = scaleIn(spring(dampingRatio = 0.6f)) + fadeIn(),
+                                                        exit = scaleOut(spring(dampingRatio = 0.8f)) + fadeOut()
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .padding(start = 8.dp)
+                                                                .clip(CircleShape)
+                                                                .background(cs.errorContainer)
+                                                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Default.Delete,
+                                                                    contentDescription = "Queued",
+                                                                    tint = cs.onErrorContainer,
+                                                                    modifier = Modifier.size(14.dp)
+                                                                )
+                                                                Text(
+                                                                    "Queued",
+                                                                    fontSize = 11.sp,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    color = cs.onErrorContainer
+                                                                )
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -480,14 +540,14 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                 }
                             }
 
-                            // ── Persistent Floating Action Bar (Delete Selected / Clean All) ──
+                            // ── Persistent Floating Action Bar (Delete Queued / Queue All) ──
                             Card(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
                                     .navigationBarsPadding()
                                     .padding(horizontal = 16.dp, vertical = 12.dp)
                                     .fillMaxWidth()
-                                    .shadow(12.dp, CircleShape),
+                                    .shadow(14.dp, CircleShape),
                                 shape = CircleShape,
                                 colors = CardDefaults.cardColors(containerColor = cs.surface),
                                 border = BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.35f))
@@ -501,17 +561,17 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            if (selectedUris.isNotEmpty())
-                                                "${selectedUris.size} selected"
+                                            if (queuedUris.isNotEmpty())
+                                                "${queuedUris.size} queued"
                                             else
                                                 "${displayedItems.size} items",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 14.sp,
-                                            color = cs.onSurface
+                                            color = if (queuedUris.isNotEmpty()) cs.error else cs.onSurface
                                         )
                                         Text(
-                                            if (selectedUris.isNotEmpty())
-                                                humanBytes(selectedBytes)
+                                            if (queuedUris.isNotEmpty())
+                                                humanBytes(queuedBytes)
                                             else
                                                 humanBytes(displayedItems.sumOf { it.sizeBytes }),
                                             fontSize = 12.sp,
@@ -519,10 +579,10 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                         )
                                     }
 
-                                    if (selectedUris.isNotEmpty()) {
+                                    if (queuedUris.isNotEmpty()) {
                                         Button(
                                             onClick = {
-                                                confirmDelete(selectedItemsList)
+                                                confirmDelete(queuedItemsList)
                                             },
                                             shape = CircleShape,
                                             colors = ButtonDefaults.buttonColors(
@@ -536,15 +596,14 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                             )
                                             Spacer(Modifier.width(6.dp))
                                             Text(
-                                                "Delete Selected (${selectedUris.size})",
+                                                "Delete Queued (${queuedUris.size})",
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
                                     } else {
                                         Button(
                                             onClick = {
-                                                selectedUris = displayedItems.map { it.uri.toString() }.toSet()
-                                                confirmDelete(displayedItems)
+                                                queuedUris = displayedItems.map { it.uri.toString() }.toSet()
                                             },
                                             shape = CircleShape,
                                             colors = ButtonDefaults.buttonColors(
@@ -557,7 +616,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Spacer(Modifier.width(6.dp))
-                                            Text("Clean All", fontWeight = FontWeight.Bold)
+                                            Text("Queue All", fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -568,15 +627,40 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             }
         }
     }
+
+    // ── Instant Apple Quick Look-Style Media Preview Dialog ──
+    previewItem?.let { target ->
+        MediaPreviewDialog(
+            item = target,
+            isQueued = target.uri.toString() in queuedUris,
+            onToggleQueue = {
+                val uriStr = target.uri.toString()
+                queuedUris = if (uriStr in queuedUris) queuedUris - uriStr else queuedUris + uriStr
+            },
+            onKeepSafe = {
+                KeepSafe.add(context, target.uri)
+                SuggestionEngine.observe(target, "kept")
+                categories = categories.map { cat ->
+                    cat.copy(items = cat.items.filter { it.uri != target.uri })
+                }.filter { it.items.isNotEmpty() }
+                queuedUris = queuedUris - target.uri.toString()
+                previewItem = null
+                Toast.makeText(context, "Saved to Keep-safe 🛡️", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { previewItem = null }
+        )
+    }
 }
 
 /**
- * Reusable swipable item container:
- * - Swipe left: reveals red Delete background -> calls [onSwipeLeft]
- * - Swipe right: reveals green Keep Safe background -> calls [onSwipeRight]
+ * Material 3 Expressive swipable item container:
+ * - Expressive bouncy springs with dynamic icon scaling and opacity
+ * - Swipe left: reveals red Queue Delete background with smooth icon expansion
+ * - Swipe right: reveals green Keep Safe background with smooth icon expansion
  */
 @Composable
 private fun SwipeActionItem(
+    isQueued: Boolean,
     modifier: Modifier = Modifier,
     onSwipeLeft: () -> Unit,
     onSwipeRight: () -> Unit,
@@ -585,14 +669,17 @@ private fun SwipeActionItem(
     val offsetX = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
-    val thresholdPx = with(density) { 90.dp.toPx() }
+    val thresholdPx = with(density) { 85.dp.toPx() }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
     ) {
         val currentOffset = offsetX.value
+        val progress = (abs(currentOffset) / thresholdPx).coerceIn(0f, 1.4f)
+        val iconScale = (0.6f + progress * 0.45f).coerceIn(0.6f, 1.15f)
+        val alpha = progress.coerceIn(0f, 1f)
 
         if (currentOffset > 8f) {
             // Swiping right: Green (Keep Safe)
@@ -603,26 +690,28 @@ private fun SwipeActionItem(
                 contentAlignment = Alignment.CenterStart
             ) {
                 Row(
-                    modifier = Modifier.padding(start = 20.dp),
+                    modifier = Modifier
+                        .padding(start = 22.dp)
+                        .scale(iconScale),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
                         Icons.Default.Security,
                         contentDescription = "Keep Safe",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        tint = Color.White.copy(alpha = alpha),
+                        modifier = Modifier.size(24.dp)
                     )
                     Text(
                         "Keep Safe",
-                        color = Color.White,
+                        color = Color.White.copy(alpha = alpha),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                 }
             }
         } else if (currentOffset < -8f) {
-            // Swiping left: Red (Delete)
+            // Swiping left: Red (Queue / Delete)
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -630,32 +719,34 @@ private fun SwipeActionItem(
                 contentAlignment = Alignment.CenterEnd
             ) {
                 Row(
-                    modifier = Modifier.padding(end = 20.dp),
+                    modifier = Modifier
+                        .padding(end = 22.dp)
+                        .scale(iconScale),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "Delete",
-                        color = Color.White,
+                        if (isQueued) "Remove Queue" else "Queue Delete",
+                        color = Color.White.copy(alpha = alpha),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        if (isQueued) Icons.Default.RemoveCircleOutline else Icons.Default.Delete,
+                        contentDescription = "Queue Delete",
+                        tint = Color.White.copy(alpha = alpha),
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
         }
 
-        // Foreground content
+        // Foreground content with bouncy spring snapback
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                .pointerInput(Unit) {
+                .pointerInput(isQueued) {
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
@@ -670,26 +761,26 @@ private fun SwipeActionItem(
                                 if (offsetX.value > thresholdPx) {
                                     offsetX.animateTo(
                                         0f,
-                                        spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                                        spring(dampingRatio = 0.65f, stiffness = 380f)
                                     )
                                     onSwipeRight()
                                 } else if (offsetX.value < -thresholdPx) {
                                     offsetX.animateTo(
                                         0f,
-                                        spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                                        spring(dampingRatio = 0.65f, stiffness = 380f)
                                     )
                                     onSwipeLeft()
                                 } else {
                                     offsetX.animateTo(
                                         0f,
-                                        spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                                        spring(dampingRatio = 0.65f, stiffness = 380f)
                                     )
                                 }
                             }
                         },
                         onDragCancel = {
                             scope.launch {
-                                offsetX.animateTo(0f)
+                                offsetX.animateTo(0f, spring(dampingRatio = 0.65f, stiffness = 380f))
                             }
                         }
                     )
