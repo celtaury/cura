@@ -92,7 +92,6 @@ private fun CuraNav() {
         route == "keepsafe" -> KeepSafeScreen(onBack = goBack)
         route == "more" -> MoreToolsScreen(onBack = goBack, onNavigate = navigate)
         route == "settings" -> SettingsScreen(onBack = goBack, onNavigate = navigate)
-        route == "suggestions" -> SuggestionsScreen(onBack = goBack, onNavigate = navigate)
         route == "browse_gallery" -> BrowseGalleryScreen(onBack = goBack)
         route.startsWith("deck_") -> DeckFlowForRoute(route = route, onBack = goBack)
         else -> DashboardScreen(onNavigate = navigate)

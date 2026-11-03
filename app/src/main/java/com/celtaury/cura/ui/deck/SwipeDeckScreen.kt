@@ -85,6 +85,7 @@ import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.PermissionGate
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
+import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.monthLabelOf
 import com.celtaury.cura.core.relativeDays
@@ -242,6 +243,7 @@ private fun DeckContent(
     }
 
     fun decide(item: MediaItem, action: String) {
+        SuggestionEngine.observe(item, action)   // Batch 4: feed the leaf-tile brain
         if (action == "kept") {
             KeepSafe.add(context, item.uri)
         } else {
