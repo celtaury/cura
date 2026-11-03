@@ -55,6 +55,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -103,7 +107,7 @@ import kotlin.math.roundToInt
  * Social Cleaner with Material 3 Expressive UI:
  * - Checkmarks removed entirely for a cleaner, modern look
  * - Swiping left queues the item into the delete list (with expressive animations)
- * - Swiping right saves/protects the item to Keep-safe
+ * - Swiping right saves/protects the item to Keep-safe (with instant Undo action)
  * - Clicking thumbnail opens instant Apple Quick Look-style media preview
  * - Persistent delete queue saved across app restarts
  * - Persistent floating bar with "Delete Selected" and confirmation dialog
@@ -123,6 +127,8 @@ fun SocialCleanerScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 private fun SocialCleanerContent(onBack: () -> Unit) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var items by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -140,6 +146,29 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
     // Persist delete queue so selections survive app exits
     LaunchedEffect(queuedUris) {
         DeleteQueuePrefs.setQueue(context, "social", queuedUris)
+    }
+
+    // Keep Safe with Undo capability
+    fun keepItemSafe(item: MediaItem) {
+        KeepSafe.add(context, item.uri, "WhatsApp")
+        SuggestionEngine.observe(item, "kept")
+        val prevItems = items
+        items = items.filter { it.uri != item.uri }
+        queuedUris = queuedUris - item.uri.toString()
+
+        scope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val result = snackbarHostState.showSnackbar(
+                message = "Saved \"${item.displayName}\" to Keep-safe 🛡️",
+                actionLabel = "Undo",
+                duration = SnackbarDuration.Short
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                KeepSafe.remove(context, item.uri)
+                items = prevItems
+                Toast.makeText(context, "Protection removed", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // Confirmable delete with preview sheet
@@ -193,6 +222,14 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
 
     Scaffold(
         containerColor = cs.background,
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = 76.dp)
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -381,16 +418,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                         }
                                     },
                                     onSwipeRight = {
-                                        // Swipe Right: Save / Keep Safe
-                                        KeepSafe.add(context, item.uri)
-                                        SuggestionEngine.observe(item, "kept")
-                                        items = items.filter { it.uri != item.uri }
-                                        queuedUris = queuedUris - item.uri.toString()
-                                        Toast.makeText(
-                                            context,
-                                            "Saved to Keep-safe 🛡️",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        keepItemSafe(item)
                                     }
                                 ) {
                                     val animatedBgColor by animateColorAsState(
@@ -636,12 +664,8 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                 queuedUris = if (uriStr in queuedUris) queuedUris - uriStr else queuedUris + uriStr
             },
             onKeepSafe = {
-                KeepSafe.add(context, target.uri)
-                SuggestionEngine.observe(target, "kept")
-                items = items.filter { it.uri != target.uri }
-                queuedUris = queuedUris - target.uri.toString()
+                keepItemSafe(target)
                 previewItem = null
-                Toast.makeText(context, "Saved to Keep-safe 🛡️", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { previewItem = null }
         )

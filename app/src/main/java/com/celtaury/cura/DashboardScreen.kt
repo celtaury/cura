@@ -50,6 +50,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -116,6 +120,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val dark = isSystemInDarkTheme()
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val orangeContainer = if (dark) AccentOrangeContainerDark else AccentOrangeContainer
 
     var storageInfo by remember { mutableStateOf<StorageInfo?>(null) }
@@ -666,6 +671,14 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 }
             }
         }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp)
+        )
     }
 
     // ── Abandoned Photo Preview Sheet with confirmable delete ──
@@ -673,11 +686,23 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
         ForgottenPhotoSheet(
             item = item,
             onKeep = {
-                KeepSafe.add(context, item.uri)
-                SuggestionEngine.observe(item, "kept")
+                val kept = item
+                KeepSafe.add(context, kept.uri, "Suggestions")
+                SuggestionEngine.observe(kept, "kept")
                 sheetItem = null
                 pickVersion++
-                Toast.makeText(context, "Added to Keep-safe 🛡️", Toast.LENGTH_SHORT).show()
+                scope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message = "Saved to Keep-safe 🛡️",
+                        actionLabel = "Undo",
+                        duration = SnackbarDuration.Short
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        KeepSafe.remove(context, kept.uri)
+                        pickVersion++
+                        Toast.makeText(context, "Protection removed", Toast.LENGTH_SHORT).show()
+                    }
+                }
             },
             onClean = {
                 val candidate = sheetItem

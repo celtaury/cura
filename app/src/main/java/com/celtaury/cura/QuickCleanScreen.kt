@@ -54,6 +54,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -103,6 +107,8 @@ import kotlin.math.roundToInt
 fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     var phase by remember { mutableStateOf("scanning") }
     var scanStatus by remember { mutableStateOf("Warming up…") }
@@ -152,6 +158,31 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
         DeleteQueuePrefs.setQueue(context, "quick_clean", queuedUris)
     }
 
+    // Keep Safe with Undo capability
+    fun keepItemSafe(item: MediaItem) {
+        KeepSafe.add(context, item.uri, "Quick Clean")
+        SuggestionEngine.observe(item, "kept")
+        val prevCategories = categories
+        categories = categories.map { cat ->
+            cat.copy(items = cat.items.filter { it.uri != item.uri })
+        }.filter { it.items.isNotEmpty() }
+        queuedUris = queuedUris - item.uri.toString()
+
+        scope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val result = snackbarHostState.showSnackbar(
+                message = "Saved \"${item.displayName}\" to Keep-safe 🛡️",
+                actionLabel = "Undo",
+                duration = SnackbarDuration.Short
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                KeepSafe.remove(context, item.uri)
+                categories = prevCategories
+                Toast.makeText(context, "Protection removed", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Confirmable delete sheet before system deletion
     val confirmDelete = rememberConfirmableDelete(
         onCleaned = {
@@ -191,6 +222,14 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 
     Scaffold(
         containerColor = cs.background,
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = 76.dp)
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -395,18 +434,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                 }
                                             },
                                             onSwipeRight = {
-                                                // Swipe Right: Save/Never suggest again
-                                                KeepSafe.add(context, item.uri)
-                                                SuggestionEngine.observe(item, "kept")
-                                                categories = categories.map { cat ->
-                                                    cat.copy(items = cat.items.filter { it.uri != item.uri })
-                                                }.filter { it.items.isNotEmpty() }
-                                                queuedUris = queuedUris - item.uri.toString()
-                                                Toast.makeText(
-                                                    context,
-                                                    "Saved to Keep-safe 🛡️",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
+                                                keepItemSafe(item)
                                             }
                                         ) {
                                             val animatedBgColor by animateColorAsState(
@@ -638,14 +666,8 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 queuedUris = if (uriStr in queuedUris) queuedUris - uriStr else queuedUris + uriStr
             },
             onKeepSafe = {
-                KeepSafe.add(context, target.uri)
-                SuggestionEngine.observe(target, "kept")
-                categories = categories.map { cat ->
-                    cat.copy(items = cat.items.filter { it.uri != target.uri })
-                }.filter { it.items.isNotEmpty() }
-                queuedUris = queuedUris - target.uri.toString()
+                keepItemSafe(target)
                 previewItem = null
-                Toast.makeText(context, "Saved to Keep-safe 🛡️", Toast.LENGTH_SHORT).show()
             },
             onDismiss = { previewItem = null }
         )
