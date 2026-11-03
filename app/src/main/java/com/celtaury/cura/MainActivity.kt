@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.ThemePrefs
+import com.celtaury.cura.ui.browse.BrowseGalleryScreen
 import com.celtaury.cura.ui.deck.DeckFlowForRoute
 import com.celtaury.cura.ui.theme.CuraTheme
 
@@ -92,6 +93,7 @@ private fun CuraNav() {
         route == "more" -> MoreToolsScreen(onBack = goBack, onNavigate = navigate)
         route == "settings" -> SettingsScreen(onBack = goBack, onNavigate = navigate)
         route == "suggestions" -> SuggestionsScreen(onBack = goBack, onNavigate = navigate)
+        route == "browse_gallery" -> BrowseGalleryScreen(onBack = goBack)
         route.startsWith("deck_") -> DeckFlowForRoute(route = route, onBack = goBack)
         else -> DashboardScreen(onNavigate = navigate)
     }

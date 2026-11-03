@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Message
@@ -437,6 +438,8 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
             val tiles = listOf(
                 FeatureTile("Review Gallery", Icons.Default.Image, "deck_gallery",
                     cs.primaryContainer, cs.primary),
+                FeatureTile("Browse Gallery", Icons.Default.CalendarMonth, "browse_gallery",
+                    cs.secondaryContainer, cs.secondary),
                 FeatureTile("Keep-safe", Icons.Default.Favorite, "keepsafe",
                     cs.errorContainer, cs.error),
                 FeatureTile("More Tools", Icons.Default.MoreHoriz, "more",

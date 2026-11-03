@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +46,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -82,7 +86,9 @@ import com.celtaury.cura.core.PermissionGate
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.humanBytes
+import com.celtaury.cura.core.monthLabelOf
 import com.celtaury.cura.core.relativeDays
+import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.core.rememberDeleteController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -108,6 +114,9 @@ private class DeckSpec(
     val subtitle: String,
     val loader: (suspend (Context) -> List<MediaItem>)? = null
 )
+
+/** One calendar month inside a deck: its key and where its cards live. */
+private data class MonthSlice(val key: String, val indexes: List<Int>)
 
 /** Route → deck registry. loader == null → memory-backed via [DeckSource]. */
 private val deckSpecs = mapOf(
@@ -174,6 +183,8 @@ private fun DeckContent(
 ) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val snack = remember { SnackbarHostState() }
 
     var items by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -185,6 +196,17 @@ private fun DeckContent(
     var previewUri by remember { mutableStateOf<Uri?>(null) }
     var sessionSaved by remember { mutableStateOf(0L) }
     var allTimeSaved by remember { mutableStateOf(0L) }
+    var pickerOpen by remember { mutableStateOf(false) }
+
+    // Per-month slices of the deck (#7): month key → where its cards live.
+    val monthSlices = remember(items) {
+        val byKey = LinkedHashMap<String, MutableList<Int>>()
+        items.forEachIndexed { i, m ->
+            byKey.getOrPut(Scanner.monthKeyOf(m.dateAddedSec)) { mutableListOf() }.add(i)
+        }
+        byKey.entries.sortedBy { it.key }
+            .map { (k, idxs) -> MonthSlice(k, idxs.toList()) }
+    }
 
     // ── load: scanner-backed or memory-backed, then resume position + queue ──
     LaunchedEffect(route) {
@@ -249,13 +271,30 @@ private fun DeckContent(
     val delete = rememberDeleteController(onCleaned = {
         val bytes = queue.sumOf { it.sizeBytes }
         SavedStats.addClean(context, bytes)
-        sessionSaved = bytes
+        sessionSaved += bytes
         DeckPrefs.clear(context, route)
         phase = "done"
     })
 
+    // Mid-deck purge: tap the queued pill → confirm sheet → blast, keep judging.
+    val purge = rememberConfirmableDelete(onCleaned = {
+        val bytes = queue.sumOf { it.sizeBytes }
+        val count = queue.size
+        SavedStats.addClean(context, bytes)
+        sessionSaved += bytes
+        queue = emptyList()
+        history = emptyList()
+        DeckPrefs.setQueue(context, route, emptyList())
+        scope.launch {
+            snack.showSnackbar(
+                "Purged $count item${if (count == 1) "" else "s"} · ${humanBytes(bytes)} freed 🎉"
+            )
+        }
+    })
+
     Scaffold(
         containerColor = cs.background,
+        snackbarHost = { SnackbarHost(snack) },
         topBar = {
             Column {
                 TopAppBar(
@@ -286,11 +325,33 @@ private fun DeckContent(
                         Spacer(Modifier.width(12.dp))
                         Text(
                             ("${index + 1} / ${items.size}" +
-                                    if (queue.isNotEmpty()) " · ${queue.size} queued" else ""),
+                                if (queue.isNotEmpty()) " · ${queue.size} queued" else ""),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = cs.onSurfaceVariant
                         )
+                    }
+                    if (monthSlices.size > 1) {
+                        val curKey = items.getOrNull(index)
+                            ?.let { Scanner.monthKeyOf(it.dateAddedSec) }
+                        val curSlice = monthSlices.firstOrNull { s -> s.key == curKey }
+                        val curLeft = curSlice?.indexes?.count { p -> p >= index } ?: 0
+                        val curLabel = curSlice?.let { s -> monthLabelOf(s.key) } ?: ""
+                        Row(
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(cs.surfaceVariant)
+                                .clickable { pickerOpen = true }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "📅 $curLabel · $curLeft left ▾",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                     Spacer(Modifier.height(6.dp))
                 }
@@ -335,9 +396,11 @@ private fun DeckContent(
                 index = index,
                 queueSize = queue.size,
                 resumedAt = resumedAt,
+                canUndo = history.isNotEmpty(),
                 onDecide = ::decide,
                 onUndo = ::undo,
-                onPreview = { previewUri = it }
+                onPreview = { previewUri = it },
+                onPurge = { purge(queue) }
             )
 
             "summary" -> SummaryPhase(
@@ -357,6 +420,22 @@ private fun DeckContent(
     previewUri?.let { uri ->
         VideoPreviewSheet(videoUri = uri, onDismiss = { previewUri = null })
     }
+
+    if (pickerOpen) {
+        MonthPickerSheet(
+            slices = monthSlices,
+            currentIndex = index,
+            currentKey = items.getOrNull(index)?.let { Scanner.monthKeyOf(it.dateAddedSec) },
+            onPick = { slice ->
+                pickerOpen = false
+                slice.indexes.filter { p -> p >= index }.minOrNull()?.let { target ->
+                    index = target
+                    persist()
+                }
+            },
+            onDismiss = { pickerOpen = false }
+        )
+    }
 }
 
 // ───────────────────────── deck phase ─────────────────────────
@@ -367,9 +446,11 @@ private fun DeckPhase(
     index: Int,
     queueSize: Int,
     resumedAt: Int,
+    canUndo: Boolean,
     onDecide: (MediaItem, String) -> Unit,
     onUndo: () -> Unit,
-    onPreview: (Uri) -> Unit
+    onPreview: (Uri) -> Unit,
+    onPurge: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
     val current = items.getOrNull(index)
@@ -384,13 +465,28 @@ private fun DeckPhase(
             )
         }
         if (queueSize > 0) {
-            Text(
-                "$queueSize queued 🧹",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = cs.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(cs.errorContainer)
+                    .clickable(onClick = onPurge)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "$queueSize queued 🧹",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onErrorContainer
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "tap to purge",
+                    fontSize = 12.sp,
+                    color = cs.onErrorContainer.copy(alpha = 0.7f)
+                )
+            }
         }
         Spacer(Modifier.height(10.dp))
 
@@ -454,7 +550,7 @@ private fun DeckPhase(
                     contentColor = cs.onTertiaryContainer
                 )
             ) { Text("🛡️ Keep", fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onUndo, enabled = index > 0) {
+            TextButton(onClick = onUndo, enabled = canUndo && index > 0) {
                 Text("↺ Undo")
             }
             Button(
@@ -649,6 +745,68 @@ private fun SwipeHint(text: String, color: Color, modifier: Modifier = Modifier,
         fontSize = 22.sp,
         modifier = modifier.graphicsLayer { this.alpha = alpha }
     )
+}
+
+// ───────────────────────── month picker (#7) ─────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MonthPickerSheet(
+    slices: List<MonthSlice>,
+    currentIndex: Int,
+    currentKey: String?,
+    onPick: (MonthSlice) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            Text(
+                "Jump to a month",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Per-month progress · tap a month to jump to its first un-judged card",
+                fontSize = 12.sp,
+                color = cs.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(slices, key = { it.key }) { slice ->
+                    val left = slice.indexes.count { p -> p >= currentIndex }
+                    val isCurrent = slice.key == currentKey
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isCurrent) cs.primaryContainer else Color.Transparent)
+                            .clickable(enabled = left > 0 && !isCurrent) { onPick(slice) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            monthLabelOf(slice.key),
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            when {
+                                isCurrent -> "you are here"
+                                left > 0 -> "$left to judge"
+                                else -> "✓ judged"
+                            },
+                            fontSize = 12.sp,
+                            color = if (left > 0 && !isCurrent) cs.primary else cs.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+        }
+    }
 }
 
 // ───────────────────────── summary phase ─────────────────────────

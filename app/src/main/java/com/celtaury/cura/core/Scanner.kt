@@ -339,6 +339,29 @@ object Scanner {
             groups.entries.sortedByDescending { it.key }.map { it.key to it.value.toList() }
         }
 
+    /**
+     * Gallery Browse (#3): images + video grouped by month key ("2026-10"),
+     * newest month first, newest item first. Keep-safe items are excluded —
+     * "kept" means "out of every cleaner surface".
+     */
+    suspend fun galleryByMonth(context: Context): List<Pair<String, List<MediaItem>>> =
+        withContext(Dispatchers.IO) {
+            val all = mutableListOf<MediaItem>()
+            for (k in listOf("images", "video")) {
+                all += query(
+                    context,
+                    mediaUri(k),
+                    selection = "${MediaStore.MediaColumns.SIZE} > 0"
+                )
+            }
+            all.filter { !isProtected(context, it) }
+                .distinctBy { it.uri }
+                .groupBy { monthKeyOf(it.dateAddedSec) }
+                .entries
+                .sortedByDescending { it.key }
+                .map { (key, list) -> key to list.sortedByDescending { it.dateAddedSec } }
+        }
+
     // ── misc ─────────────────────────────────────────────────────────
 
     fun bucketOf(item: MediaItem): String {

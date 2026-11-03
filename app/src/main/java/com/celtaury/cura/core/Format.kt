@@ -13,6 +13,14 @@ fun humanBytes(bytes: Long): String {
     return String.format(Locale.US, "%.1f GB", gb)
 }
 
+/** "2026-10" → "October 2026" (device locale); falls back to the raw key. */
+fun monthLabelOf(monthKey: String): String = try {
+    java.time.YearMonth.parse(monthKey)
+        .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+} catch (_: Exception) {
+    monthKey
+}
+
 /** "3 days ago" style relative label from a unix-seconds timestamp. */
 fun relativeDays(dateAddedSec: Long, nowSec: Long = System.currentTimeMillis() / 1000): String {
     val days = ((nowSec - dateAddedSec) / 86400L).coerceAtLeast(0)
