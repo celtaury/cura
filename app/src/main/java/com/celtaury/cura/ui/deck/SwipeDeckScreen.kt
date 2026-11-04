@@ -91,6 +91,7 @@ import com.celtaury.cura.core.monthLabelOf
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.core.rememberDeleteController
+import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -194,7 +195,7 @@ private fun DeckContent(
     var phase by remember { mutableStateOf("loading") } // deck / summary / done / empty
     var history by remember { mutableStateOf(listOf<Pair<MediaItem, String>>()) }
     var resumedAt by remember { mutableStateOf(-1) }
-    var previewUri by remember { mutableStateOf<Uri?>(null) }
+    var previewItem by remember { mutableStateOf<MediaItem?>(null) }
     var sessionSaved by remember { mutableStateOf(0L) }
     var allTimeSaved by remember { mutableStateOf(0L) }
     var pickerOpen by remember { mutableStateOf(false) }
@@ -401,7 +402,7 @@ private fun DeckContent(
                 canUndo = history.isNotEmpty(),
                 onDecide = ::decide,
                 onUndo = ::undo,
-                onPreview = { previewUri = it },
+                onPreview = { previewItem = it },
                 onPurge = { purge(queue) }
             )
 
@@ -419,8 +420,27 @@ private fun DeckContent(
         }
     }
 
-    previewUri?.let { uri ->
-        VideoPreviewSheet(videoUri = uri, onDismiss = { previewUri = null })
+    previewItem?.let { item ->
+        if (item.mime.startsWith("video/")) {
+            VideoPreviewSheet(videoUri = item.uri, onDismiss = { previewItem = null })
+        } else {
+            // Social Cleaner parity: Quick Look-style preview. Its quick actions
+            // map to deck semantics — "Queue Delete" acts as swipe left,
+            // "Keep Safe" as swipe right, so undo/history stay in sync.
+            MediaPreviewDialog(
+                item = item,
+                isQueued = queue.any { it.uri == item.uri },
+                onToggleQueue = {
+                    previewItem = null
+                    decide(item, "queued")
+                },
+                onKeepSafe = {
+                    previewItem = null
+                    decide(item, "kept")
+                },
+                onDismiss = { previewItem = null }
+            )
+        }
     }
 
     if (pickerOpen) {
@@ -451,7 +471,7 @@ private fun DeckPhase(
     canUndo: Boolean,
     onDecide: (MediaItem, String) -> Unit,
     onUndo: () -> Unit,
-    onPreview: (Uri) -> Unit,
+    onPreview: (MediaItem) -> Unit,
     onPurge: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
@@ -566,7 +586,7 @@ private fun DeckPhase(
             ) { Text("🧹 Clean", fontWeight = FontWeight.Bold) }
         }
         Text(
-            "Swipe right 🛡️ to keep safe · swipe left 🧹 to queue for cleaning",
+            "Swipe right 🛡️ to keep safe · swipe left 🧹 to queue for cleaning · tap to preview",
             fontSize = 11.sp,
             color = cs.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -576,12 +596,12 @@ private fun DeckPhase(
 }
 
 @Composable
-private fun DeckCard(
+internal fun DeckCard(
     item: MediaItem,
     modifier: Modifier = Modifier,
     interactive: Boolean,
     onDecide: (MediaItem, String) -> Unit,
-    onPreview: (Uri) -> Unit
+    onPreview: (MediaItem) -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -657,6 +677,8 @@ private fun DeckCard(
                     .fillMaxWidth()
                     .weight(1f)
                     .background(cs.surfaceVariant)
+                    // tap the media to Quick Look it (only the active card)
+                    .clickable(enabled = interactive) { onPreview(item) }
             ) {
                 if (isMedia) {
                     AsyncImage(
@@ -666,10 +688,9 @@ private fun DeckCard(
                         contentScale = ContentScale.Crop
                     )
                     if (isVideo) {
+                        // purely decorative — the parent media Box handles the tap
                         Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clickable { onPreview(item.uri) },
+                            modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -814,7 +835,7 @@ private fun MonthPickerSheet(
 // ───────────────────────── summary phase ─────────────────────────
 
 @Composable
-private fun SummaryPhase(
+internal fun SummaryPhase(
     queued: List<MediaItem>,
     onConfirm: () -> Unit,
     onLater: () -> Unit

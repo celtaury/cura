@@ -145,6 +145,28 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
 
             Spacer(Modifier.height(20.dp))
 
+            // ── Legacy tools (still work, just live in the attic now) ──
+            Text(
+                "Legacy tools",
+                style = MaterialTheme.typography.titleSmall,
+                color = cs.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            MenuRow(
+                title = "Large Files · legacy",
+                subtitle = "Older tool — files over 50 MB, biggest first"
+            ) {
+                onNavigate("large_files")
+            }
+            MenuRow(
+                title = "Photo Organizer · legacy",
+                subtitle = "Older tool — group your gallery by month"
+            ) {
+                onNavigate("organize")
+            }
+
+            Spacer(Modifier.height(20.dp))
+
             // About
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -154,7 +176,7 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
                 Column(Modifier.fillMaxWidth().padding(20.dp)) {
                     Text("CURA", fontFamily = InterBlack, fontSize = 18.sp)
                     Text(
-                        "Storage care, not storage stress. v0.7 · flow build.",
+                        "Storage care, not storage stress. v0.6 · flow build.",
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant
                     )

@@ -22,7 +22,7 @@ object SuggestionEngine {
     /** One concrete suggestion for the leaf tile. */
     data class Pick(
         val item: MediaItem,       // the photo shown inside the tile
-        val reason: String,        // "Last touched 8 mo ago"
+        val reason: String,        // "Added 8 mo ago"
         val deckRoute: String,     // "" → single-photo sheet flow (forgotten)
         val familyTitle: String,   // "Old Screenshots"
         val familyCount: Int,      // how many like it are waiting
@@ -51,6 +51,11 @@ object SuggestionEngine {
         }
     }
 
+    /** Undo / cancelled-delete path — a reversed decision re-opens the file. */
+    fun forget(item: MediaItem) {
+        judged.remove(item.uri.toString())
+    }
+
     /**
      * The current best suggestion, or null when the gallery has nothing new
      * to offer (the tile then rests on its 🌿 face).
@@ -60,12 +65,14 @@ object SuggestionEngine {
      * old media aside, and a user who keeps everything silences the picker.
      */
     suspend fun pick(context: Context): Pick? = withContext(Dispatchers.IO) {
+        // in-session judgments AND persisted ones (SuggestPrefs) both bury a file
+        val buried = judged + SuggestPrefs.judged(context)
         val shots = Scanner.oldScreenshots(context, minAgeDays = 30)
-            .filter { it.uri.toString() !in judged }
+            .filter { it.uri.toString() !in buried }
         val olds = Scanner.oldMedia(context, minAgeDays = 60)
-            .filter { it.uri.toString() !in judged }
+            .filter { it.uri.toString() !in buried }
         val forgotten = Scanner.forgottenPhoto(context)
-            ?.takeIf { it.uri.toString() !in judged }
+            ?.takeIf { it.uri.toString() !in buried }
 
         val families = listOfNotNull(
             if (shots.isNotEmpty()) {
@@ -131,5 +138,5 @@ object SuggestionEngine {
     }
 
     private fun reasonFor(item: MediaItem): String =
-        "Last touched ${relativeDays(item.dateAddedSec)}"
+        "Added ${relativeDays(item.dateAddedSec)}"
 }

@@ -77,6 +77,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -86,6 +87,7 @@ import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
+import com.celtaury.cura.core.SuggestEngine
 import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.humanBytes
@@ -409,7 +411,9 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                             if (p.deckRoute.isEmpty()) {
                                 sheetItem = p.item
                             } else {
-                                onNavigate("quick_clean")
+                                // the overhaul promise: the tile's card LEADS the deck
+                                SuggestEngine.Session.seed(p.item)
+                                onNavigate("suggest")
                             }
                         },
                     shape = RoundedCornerShape(24.dp),
@@ -460,11 +464,12 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                                         p.deckRoute.isEmpty() ->
                                             "${p.item.displayName} · ${relativeDays(p.item.dateAddedSec)}"
                                         else ->
-                                            "${p.reason} · ${p.familyCount} files"
+                                            "${p.reason} · ${p.familyCount} files · ${humanBytes(p.familyBytes)}"
                                     },
                                     fontSize = 12.sp,
                                     color = Color.White.copy(alpha = 0.85f),
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         } else {

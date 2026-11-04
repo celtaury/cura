@@ -362,6 +362,23 @@ object Scanner {
                 .map { (key, list) -> key to list.sortedByDescending { it.dateAddedSec } }
         }
 
+    /**
+     * Re-hydrate items by MediaStore id (any type) — used to restore a saved
+     * Suggest session after the app was killed. Order follows [ids].
+     */
+    suspend fun itemsByIds(context: Context, ids: List<Long>): List<MediaItem> =
+        withContext(Dispatchers.IO) {
+            if (ids.isEmpty()) return@withContext emptyList()
+            val selection = "${MediaStore.MediaColumns._ID} IN (${ids.joinToString(",") { "?" }})"
+            val byOrder = ids.withIndex().associate { (pos, id) -> id to pos }
+            query(
+                context,
+                mediaUri("files"),
+                selection = selection,
+                args = ids.map { it.toString() }.toTypedArray()
+            ).sortedBy { byOrder[it.id] ?: Int.MAX_VALUE }
+        }
+
     // ── misc ─────────────────────────────────────────────────────────
 
     fun bucketOf(item: MediaItem): String {

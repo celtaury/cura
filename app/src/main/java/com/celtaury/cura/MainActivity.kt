@@ -85,6 +85,7 @@ private fun CuraNav() {
         route == "quick_clean" -> QuickCleanScreen(onBack = goBack, onNavigate = navigate)
         route == "large_files" -> LargeFilesScreen(onBack = goBack)
         route == "screenshots" -> OldScreenshotsScreen(onBack = goBack)
+        route == "suggest" -> SuggestScreen(onBack = goBack)
         route == "old_media" -> OldMediaScreen(onBack = goBack)
         route == "organize" -> OrganizeImagesScreen(onBack = goBack)
         route == "compress" -> CompressScreen(onBack = goBack)
