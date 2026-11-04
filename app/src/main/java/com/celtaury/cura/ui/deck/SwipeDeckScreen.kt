@@ -57,6 +57,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -90,7 +91,6 @@ import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.monthLabelOf
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
-import com.celtaury.cura.core.rememberDeleteController
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -271,7 +271,9 @@ private fun DeckContent(
         phase = "deck"
     }
 
-    val delete = rememberDeleteController(onCleaned = {
+    // Summary "Confirm & Clean" routes through the same in-app confirm sheet
+    // as every other flow — thumbnails + size before the system dialog.
+    val confirmDelete = rememberConfirmableDelete(onCleaned = {
         val bytes = queue.sumOf { it.sizeBytes }
         SavedStats.addClean(context, bytes)
         sessionSaved += bytes
@@ -408,7 +410,7 @@ private fun DeckContent(
 
             "summary" -> SummaryPhase(
                 queued = queue,
-                onConfirm = { delete(queue.map { it.uri }) },
+                onConfirm = { confirmDelete(queue) },
                 onLater = onBack
             )
 
@@ -477,6 +479,19 @@ private fun DeckPhase(
     val cs = MaterialTheme.colorScheme
     val current = items.getOrNull(index)
 
+    // Purge pill pulse: bump-scale the thumb-zone CTA each time the queue
+    // grows, so it announces itself while you judge. Also fires once on
+    // entry when a saved queue was restored.
+    val purgePulse = remember { Animatable(1f) }
+    var lastQueueSize by remember { mutableIntStateOf(0) }
+    LaunchedEffect(queueSize) {
+        if (queueSize > lastQueueSize) {
+            purgePulse.snapTo(1.22f)
+            purgePulse.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 320f))
+        }
+        lastQueueSize = queueSize
+    }
+
     Column(Modifier.fillMaxSize()) {
         if (resumedAt in 1 until items.size && index == resumedAt) {
             Text(
@@ -486,30 +501,7 @@ private fun DeckPhase(
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
         }
-        if (queueSize > 0) {
-            Row(
-                modifier = Modifier
-                    .padding(horizontal = 20.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(cs.errorContainer)
-                    .clickable(onClick = onPurge)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "$queueSize queued 🧹",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = cs.onErrorContainer
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "tap to purge",
-                    fontSize = 12.sp,
-                    color = cs.onErrorContainer.copy(alpha = 0.7f)
-                )
-            }
-        }
+        // (purge pill moved to the thumb zone below the action buttons)
         Spacer(Modifier.height(10.dp))
 
         Box(
@@ -585,13 +577,45 @@ private fun DeckPhase(
                 )
             ) { Text("🧹 Clean", fontWeight = FontWeight.Bold) }
         }
-        Text(
-            "Swipe right 🛡️ to keep safe · swipe left 🧹 to queue for cleaning · tap to preview",
-            fontSize = 11.sp,
-            color = cs.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp)
-        )
+        // thumb-zone purge CTA — pulses when the queue grows
+        if (queueSize > 0) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Row(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = purgePulse.value
+                            scaleY = purgePulse.value
+                        }
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(cs.errorContainer)
+                        .clickable(onClick = onPurge)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "$queueSize queued · tap to purge 🧹",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = cs.onErrorContainer
+                    )
+                }
+            }
+        }
+        // Gesture legend only for fresh decks — once something is queued the
+        // pill takes over as the single call to action, so it stays unmissable.
+        if (queueSize == 0) {
+            Text(
+                "Swipe right 🛡️ to keep safe · swipe left 🧹 to queue for cleaning · tap to preview",
+                fontSize = 11.sp,
+                color = cs.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp)
+            )
+        }
     }
 }
 

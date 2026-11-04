@@ -3,8 +3,15 @@ package com.celtaury.cura
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -37,6 +44,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -58,7 +66,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -508,19 +515,19 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 ) {
                     MiniFeatureCard(
                         modifier = Modifier.weight(1f),
-                        title = "Social Cleaner",
-                        icon = Icons.AutoMirrored.Filled.Message,
-                        iconBg = Color(0xFFDCF8C6),
-                        iconTint = Color(0xFF1E5B22)
-                    ) { onNavigate("social") }
-
-                    MiniFeatureCard(
-                        modifier = Modifier.weight(1f),
                         title = "Photo Compress",
                         icon = Icons.Default.AutoAwesome,
                         iconBg = orangeContainer,
                         iconTint = AccentOrange
                     ) { onNavigate("compress") }
+
+                    MiniFeatureCard(
+                        modifier = Modifier.weight(1f),
+                        title = "Social Cleaner",
+                        icon = Icons.AutoMirrored.Filled.Message,
+                        iconBg = Color(0xFFDCF8C6),
+                        iconTint = Color(0xFF1E5B22)
+                    ) { onNavigate("social") }
                 }
             }
 
@@ -567,28 +574,79 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(36.dp))
 
-            // ── Bottom Peeking Gallery Deck: "Swipe Up" (Not glued to UI) ──
-            var dragUp by remember { mutableFloatStateOf(0f) }
+            // ── Bottom Peeking Gallery Deck: "Swipe Up" (expressive drag) ──
+            // The tile follows the finger while dragging, springs back if
+            // released early, and flies up into the deck when committed.
+            // An idle bob + chevron hint keeps it visibly alive.
+            val liftY = remember { Animatable(0f) }
+            var navigating by remember { mutableStateOf(false) }
+            val bob = rememberInfiniteTransition(label = "peekBob")
+            val bobT by bob.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1100, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "peekBobT"
+            )
+
+            fun springBack() {
+                scope.launch {
+                    liftY.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = 380f))
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .pointerInput(Unit) {
+                    .graphicsLayer {
+                        translationY = (bobT - 0.5f) * 12f + liftY.value
+                        val pull = (-liftY.value / 700f).coerceIn(0f, 1f)
+                        val s = 1f + pull * 0.04f
+                        scaleX = s
+                        scaleY = s
+                    }
+                    .pointerInput(navigating) {
+                        if (navigating) return@pointerInput
                         detectVerticalDragGestures(
                             onVerticalDrag = { change, amount ->
                                 change.consume()
-                                dragUp += amount
-                                if (dragUp < -70f) {
-                                    dragUp = 0f
-                                    onNavigate("deck_gallery")
+                                scope.launch {
+                                    liftY.snapTo((liftY.value + amount).coerceIn(-420f, 26f))
                                 }
                             },
-                            onDragEnd = { dragUp = 0f },
-                            onDragCancel = { dragUp = 0f }
+                            onDragEnd = {
+                                if (!navigating) {
+                                    if (liftY.value < -120f) {
+                                        navigating = true
+                                        scope.launch {
+                                            liftY.animateTo(
+                                                -700f,
+                                                tween(240, easing = FastOutSlowInEasing)
+                                            )
+                                            onNavigate("deck_gallery")
+                                        }
+                                    } else {
+                                        springBack()
+                                    }
+                                }
+                            },
+                            onDragCancel = { springBack() }
                         )
                     }
-                    .clickable { onNavigate("deck_gallery") },
+                    .clickable { if (!navigating) onNavigate("deck_gallery") },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Icon(
+                    Icons.Default.KeyboardArrowUp,
+                    contentDescription = null,
+                    tint = cs.onBackground,
+                    modifier = Modifier.graphicsLayer {
+                        translationY = (1f - bobT) * 14f
+                        alpha = 0.4f + 0.6f * bobT
+                    }
+                )
                 Text(
                     "Swipe Up",
                     fontSize = 24.sp,

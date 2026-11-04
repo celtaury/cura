@@ -67,7 +67,6 @@ import com.celtaury.cura.core.SuggestPrefs
 import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.rememberConfirmableDelete
-import com.celtaury.cura.core.rememberDeleteController
 import com.celtaury.cura.ui.deck.DeckCard
 import com.celtaury.cura.ui.deck.SummaryPhase
 import com.celtaury.cura.ui.deck.VideoPreviewSheet
@@ -221,7 +220,9 @@ private fun SuggestContent(onBack: () -> Unit) {
         phase = "deck"
     }
 
-    val delete = rememberDeleteController(
+    // Summary "Confirm & Clean" routes through the same in-app confirm sheet
+    // as every other flow — thumbnails + size before the system dialog.
+    val confirmDelete = rememberConfirmableDelete(
         onCleaned = {
             val bytes = queue.sumOf { it.sizeBytes }
             SavedStats.addClean(context, bytes)
@@ -230,7 +231,7 @@ private fun SuggestContent(onBack: () -> Unit) {
             SuggestPrefs.clearSession(context)
             phase = "done"
         },
-        onCancelled = { unbury(queue) }   // system dialog dismissed — retryable
+        onCancelled = { unbury(queue) }   // sheet or system dialog dismissed — retryable
     )
 
     val purge = rememberConfirmableDelete(
@@ -373,7 +374,7 @@ private fun SuggestContent(onBack: () -> Unit) {
 
             "summary" -> SummaryPhase(
                 queued = queue,
-                onConfirm = { delete(queue.map { it.uri }) },
+                onConfirm = { confirmDelete(queue) },
                 onLater = onBack
             )
 

@@ -183,7 +183,7 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "CURA v0.7 · flow build — storage care, not storage stress.",
+                "CURA v0.8 · flow build — storage care, not storage stress.",
                 fontSize = 12.sp,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp)
