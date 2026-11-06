@@ -69,7 +69,6 @@ import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.deck.DeckCard
 import com.celtaury.cura.ui.deck.SummaryPhase
-import com.celtaury.cura.ui.deck.VideoPreviewSheet
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -388,26 +387,22 @@ private fun SuggestContent(onBack: () -> Unit) {
     }
 
     previewItem?.let { item ->
-        if (item.mime.startsWith("video/")) {
-            VideoPreviewSheet(videoUri = item.uri, onDismiss = { previewItem = null })
-        } else {
-            // Social Cleaner parity: Quick Look-style preview. Its quick actions
-            // map to deck semantics — "Queue Delete" acts as swipe left,
-            // "Keep Safe" as swipe right, so undo/history stay in sync.
-            MediaPreviewDialog(
-                item = item,
-                isQueued = queue.any { it.uri == item.uri },
-                onToggleQueue = {
-                    previewItem = null
-                    decide(item, "queued")
-                },
-                onKeepSafe = {
-                    previewItem = null
-                    decide(item, "kept")
-                },
-                onDismiss = { previewItem = null }
-            )
-        }
+        // Quick Look-style preview for EVERY mime — videos play inline now.
+        // Its quick actions map to deck semantics — "Queue Delete" acts as
+        // swipe left, "Keep Safe" as swipe right, so undo/history stay in sync.
+        MediaPreviewDialog(
+            item = item,
+            isQueued = queue.any { it.uri == item.uri },
+            onToggleQueue = {
+                previewItem = null
+                decide(item, "queued")
+            },
+            onKeepSafe = {
+                previewItem = null
+                decide(item, "kept")
+            },
+            onDismiss = { previewItem = null }
+        )
     }
 }
 

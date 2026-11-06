@@ -1,7 +1,6 @@
 package com.celtaury.cura.ui.deck
 
 import android.content.Context
-import android.net.Uri
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -53,7 +52,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -75,10 +73,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem as ExoMediaItem
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.DeckPrefs
 import com.celtaury.cura.core.KeepSafe
@@ -119,6 +113,12 @@ private class DeckSpec(
 
 /** One calendar month inside a deck: its key and where its cards live. */
 private data class MonthSlice(val key: String, val indexes: List<Int>)
+
+/** One judged card in the in-memory undo trail (newest last). */
+private data class DeckDecision(
+    val item: MediaItem,
+    val action: String
+)
 
 /** Route → deck registry. loader == null → memory-backed via [DeckSource]. */
 private val deckSpecs = mapOf(
@@ -193,7 +193,7 @@ private fun DeckContent(
     var index by remember { mutableStateOf(0) }
     var queue by remember { mutableStateOf(listOf<MediaItem>()) }
     var phase by remember { mutableStateOf("loading") } // deck / summary / done / empty
-    var history by remember { mutableStateOf(listOf<Pair<MediaItem, String>>()) }
+    var history by remember { mutableStateOf(listOf<DeckDecision>()) }
     var resumedAt by remember { mutableStateOf(-1) }
     var previewItem by remember { mutableStateOf<MediaItem?>(null) }
     var sessionSaved by remember { mutableStateOf(0L) }
@@ -250,7 +250,7 @@ private fun DeckContent(
         } else {
             queue = queue + item
         }
-        history = history + (item to action)
+        history = history + DeckDecision(item, action)
         index += 1
         persist()
         phase = if (index >= items.size) {
@@ -259,16 +259,23 @@ private fun DeckContent(
     }
 
     fun undo() {
-        val last = history.lastOrNull() ?: return
-        history = history.dropLast(1)
-        index -= 1
-        if (last.second == "queued") {
-            queue = queue.filterNot { it.uri == last.first.uri }
+        if (history.isEmpty()) return
+        // Single-card undo: every tap rewinds EXACTLY ONE decision — the
+        // newest. Tap again to step back another card. No volley grouping:
+        // one action, one undo, fully predictable.
+        val last = history.last()
+        if (last.action == "queued") {
+            queue = queue.filterNot { it.uri == last.item.uri }
         } else {
-            KeepSafe.remove(context, last.first.uri)
+            KeepSafe.remove(context, last.item.uri)
         }
+        index -= 1
+        history = history.dropLast(1)
         persist()
         phase = "deck"
+        scope.launch {
+            snack.showSnackbar("↺ Back one card")
+        }
     }
 
     // Summary "Confirm & Clean" routes through the same in-app confirm sheet
@@ -396,23 +403,31 @@ private fun DeckContent(
                 }
             }
 
-            "deck" -> DeckPhase(
-                items = items,
-                index = index,
-                queueSize = queue.size,
-                resumedAt = resumedAt,
-                canUndo = history.isNotEmpty(),
-                onDecide = ::decide,
-                onUndo = ::undo,
-                onPreview = { previewItem = it },
-                onPurge = { purge(queue) }
-            )
+            "deck" -> Box(
+                modifier = Modifier.padding(bottom = padding.calculateBottomPadding())
+            ) {
+                DeckPhase(
+                    items = items,
+                    index = index,
+                    queueSize = queue.size,
+                    resumedAt = resumedAt,
+                    canUndo = history.isNotEmpty(),
+                    onDecide = ::decide,
+                    onUndo = ::undo,
+                    onPreview = { previewItem = it },
+                    onPurge = { purge(queue) }
+                )
+            }
 
-            "summary" -> SummaryPhase(
-                queued = queue,
-                onConfirm = { confirmDelete(queue) },
-                onLater = onBack
-            )
+            "summary" -> Box(
+                modifier = Modifier.padding(bottom = padding.calculateBottomPadding())
+            ) {
+                SummaryPhase(
+                    queued = queue,
+                    onConfirm = { confirmDelete(queue) },
+                    onLater = onBack
+                )
+            }
 
             "done" -> DonePhase(
                 sessionSaved = sessionSaved,
@@ -423,26 +438,22 @@ private fun DeckContent(
     }
 
     previewItem?.let { item ->
-        if (item.mime.startsWith("video/")) {
-            VideoPreviewSheet(videoUri = item.uri, onDismiss = { previewItem = null })
-        } else {
-            // Social Cleaner parity: Quick Look-style preview. Its quick actions
-            // map to deck semantics — "Queue Delete" acts as swipe left,
-            // "Keep Safe" as swipe right, so undo/history stay in sync.
-            MediaPreviewDialog(
-                item = item,
-                isQueued = queue.any { it.uri == item.uri },
-                onToggleQueue = {
-                    previewItem = null
-                    decide(item, "queued")
-                },
-                onKeepSafe = {
-                    previewItem = null
-                    decide(item, "kept")
-                },
-                onDismiss = { previewItem = null }
-            )
-        }
+        // Quick Look-style preview for EVERY mime — videos play inline now.
+        // Its quick actions map to deck semantics — "Queue Delete" acts as
+        // swipe left, "Keep Safe" as swipe right, so undo/history stay in sync.
+        MediaPreviewDialog(
+            item = item,
+            isQueued = queue.any { it.uri == item.uri },
+            onToggleQueue = {
+                previewItem = null
+                decide(item, "queued")
+            },
+            onKeepSafe = {
+                previewItem = null
+                decide(item, "kept")
+            },
+            onDismiss = { previewItem = null }
+        )
     }
 
     if (pickerOpen) {
@@ -564,7 +575,7 @@ private fun DeckPhase(
                     contentColor = cs.onTertiaryContainer
                 )
             ) { Text("🛡️ Keep", fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onUndo, enabled = canUndo && index > 0) {
+            TextButton(onClick = onUndo, enabled = canUndo) {
                 Text("↺ Undo")
             }
             Button(
@@ -1001,40 +1012,4 @@ private fun DonePhase(sessionSaved: Long, allTimeSaved: Long, onBack: () -> Unit
     }
 }
 
-// ───────────────────────── video preview ─────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun VideoPreviewSheet(videoUri: Uri, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(ExoMediaItem.fromUri(videoUri))
-            prepare()
-            playWhenReady = true
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
-    }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Preview", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(14.dp))
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = true
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-            )
-            Spacer(Modifier.height(14.dp))
-            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("Close Preview")
-            }
-            Spacer(Modifier.height(20.dp))
-        }
-    }
-}
+// ───────────────────────── end of SwipeDeckScreen ─────────────────────────

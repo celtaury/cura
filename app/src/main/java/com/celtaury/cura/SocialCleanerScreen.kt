@@ -98,6 +98,7 @@ import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import com.celtaury.cura.ui.theme.InterBlack
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -112,6 +113,11 @@ import kotlin.math.roundToInt
  * - Persistent delete queue saved across app restarts
  * - Persistent floating bar with "Delete Selected" and confirmation dialog
  */
+/** One Keep-safe action that can still be undone (burst-style, list edition).
+ *  Named per-file (Social…) — K2 flags same-name top-level classes as redeclaration
+ *  even when private, so every file owns a uniquely-named type. */
+private data class SocialPendingKeep(val item: MediaItem, val wasQueued: Boolean)
+
 @Composable
 fun SocialCleanerScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     PermissionGate(
@@ -148,25 +154,58 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
         DeleteQueuePrefs.setQueue(context, "social", queuedUris)
     }
 
-    // Keep Safe with Undo capability
+    // ── Keep Safe undo, volley edition ──
+    // One undo slot that ACCUMULATES: every keep joins the currently-undoable
+    // group and the snackbar restarts its timer showing the running count.
+    // Tapping Undo rolls the whole volley back; letting it expire commits.
+    // (Before: each new snackbar silently killed the previous one's Undo, so
+    // two quick swipes right left you with one undoable item and one stuck.)
+    var pendingKeeps by remember { mutableStateOf(listOf<SocialPendingKeep>()) }
+    var keepBaseItems by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var keepUndoJob by remember { mutableStateOf<Job?>(null) }
+
+    fun commitKeeps() {
+        keepUndoJob?.cancel()
+        pendingKeeps = emptyList()
+        keepBaseItems = null
+    }
+
     fun keepItemSafe(item: MediaItem) {
+        if (keepBaseItems == null) keepBaseItems = items   // first keep of this volley: remember the list
+        pendingKeeps = pendingKeeps + SocialPendingKeep(item, item.uri.toString() in queuedUris)
         KeepSafe.add(context, item.uri, "WhatsApp")
         SuggestionEngine.observe(item, "kept")
-        val prevItems = items
         items = items.filter { it.uri != item.uri }
         queuedUris = queuedUris - item.uri.toString()
 
-        scope.launch {
-            snackbarHostState.currentSnackbarData?.dismiss()
+        keepUndoJob?.cancel()                              // old waiter dies; its items stay pending
+        snackbarHostState.currentSnackbarData?.dismiss()
+        keepUndoJob = scope.launch {
+            val group = pendingKeeps
             val result = snackbarHostState.showSnackbar(
-                message = "Saved \"${item.displayName}\" to Keep-safe 🛡️",
+                message = if (group.size == 1)
+                    "Saved \"${item.displayName}\" to Keep-safe 🛡️"
+                else
+                    "Kept ${group.size} items safe 🛡️",
                 actionLabel = "Undo",
-                duration = SnackbarDuration.Short
+                duration = SnackbarDuration.Long
             )
             if (result == SnackbarResult.ActionPerformed) {
-                KeepSafe.remove(context, item.uri)
-                items = prevItems
-                Toast.makeText(context, "Protection removed", Toast.LENGTH_SHORT).show()
+                group.forEach { KeepSafe.remove(context, it.item.uri) }
+                items = keepBaseItems ?: items             // exact original list, original positions
+                group.forEach { pk ->
+                    if (pk.wasQueued) queuedUris = queuedUris + pk.item.uri.toString()
+                }
+                pendingKeeps = emptyList()
+                keepBaseItems = null
+                Toast.makeText(
+                    context,
+                    if (group.size == 1) "Protection removed" else "${group.size} protections removed",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                pendingKeeps = emptyList()
+                keepBaseItems = null
             }
         }
     }
@@ -174,6 +213,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
     // Confirmable delete with preview sheet
     val confirmDelete = rememberConfirmableDelete(
         onCleaned = {
+            commitKeeps()   // cleaned items are gone for good — a stale keep-undo must not resurrect them
             val deletedItems = items.filter { it.uri.toString() in queuedUris }
             val freedBytes = deletedItems.sumOf { it.sizeBytes }
 
@@ -777,30 +817,23 @@ private fun SwipeActionItem(
                             }
                         },
                         onDragEnd = {
+                            // Action FIRST — instant state change — then the
+                            // snapback in parallel. Chaining the action after a
+                            // soft spring delayed feedback by ~2 s (bug #6).
+                            when {
+                                offsetX.value > thresholdPx -> onSwipeRight()
+                                offsetX.value < -thresholdPx -> onSwipeLeft()
+                            }
                             scope.launch {
-                                if (offsetX.value > thresholdPx) {
-                                    offsetX.animateTo(
-                                        0f,
-                                        spring(dampingRatio = 0.65f, stiffness = 380f)
-                                    )
-                                    onSwipeRight()
-                                } else if (offsetX.value < -thresholdPx) {
-                                    offsetX.animateTo(
-                                        0f,
-                                        spring(dampingRatio = 0.65f, stiffness = 380f)
-                                    )
-                                    onSwipeLeft()
-                                } else {
-                                    offsetX.animateTo(
-                                        0f,
-                                        spring(dampingRatio = 0.65f, stiffness = 380f)
-                                    )
-                                }
+                                offsetX.animateTo(
+                                    0f,
+                                    spring(dampingRatio = 0.8f, stiffness = 700f)
+                                )
                             }
                         },
                         onDragCancel = {
                             scope.launch {
-                                offsetX.animateTo(0f, spring(dampingRatio = 0.65f, stiffness = 380f))
+                                offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 700f))
                             }
                         }
                     )

@@ -1,6 +1,5 @@
 package com.celtaury.cura.ui.browse
 
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -72,9 +71,9 @@ import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.monthLabelOf
 import com.celtaury.cura.core.rememberConfirmableDelete
-import com.celtaury.cura.ui.deck.VideoPreviewSheet
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -109,22 +108,42 @@ private fun BrowseContent(onBack: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var queued by remember { mutableStateOf(listOf<MediaItem>()) }
     var hidden by remember { mutableStateOf(setOf<String>()) }
-    var previewUri by remember { mutableStateOf<Uri?>(null) }
     var previewItem by remember { mutableStateOf<MediaItem?>(null) }
 
+    // Keep-safe undo, volley edition: keeps accumulate into ONE undoable group.
+    // Each new keep restarts the snackbar timer with the running count; Undo
+    // rolls the whole volley back, letting it expire commits.
+    var pendingKeeps by remember { mutableStateOf(listOf<MediaItem>()) }
+    var keepUndoJob by remember { mutableStateOf<Job?>(null) }
+
     fun keepItemSafe(item: MediaItem) {
+        pendingKeeps = pendingKeeps + item
         KeepSafe.add(context, item.uri, "Browse Gallery")
         hidden = hidden + item.uri.toString()
-        scope.launch {
+
+        keepUndoJob?.cancel()
+        snack.currentSnackbarData?.dismiss()
+        keepUndoJob = scope.launch {
+            val group = pendingKeeps
             val result = snack.showSnackbar(
-                message = "Saved \"${item.displayName}\" to Keep-safe 🛡️",
+                message = if (group.size == 1)
+                    "Saved \"${item.displayName}\" to Keep-safe 🛡️"
+                else
+                    "Kept ${group.size} items safe 🛡️",
                 actionLabel = "Undo",
-                duration = SnackbarDuration.Short
+                duration = SnackbarDuration.Long
             )
             if (result == SnackbarResult.ActionPerformed) {
-                KeepSafe.remove(context, item.uri)
-                hidden = hidden - item.uri.toString()
-                Toast.makeText(context, "Protection removed", Toast.LENGTH_SHORT).show()
+                group.forEach { KeepSafe.remove(context, it.uri) }
+                hidden = hidden - group.map { it.uri.toString() }.toSet()
+                pendingKeeps = emptyList()
+                Toast.makeText(
+                    context,
+                    if (group.size == 1) "Protection removed" else "${group.size} protections removed",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                pendingKeeps = emptyList()
             }
         }
     }
@@ -146,6 +165,8 @@ private fun BrowseContent(onBack: () -> Unit) {
         val bytes = queued.sumOf { it.sizeBytes }
         val count = queued.size
         SavedStats.addClean(context, bytes)
+        keepUndoJob?.cancel()   // purged files are gone — a stale keep-undo must not un-hide them
+        pendingKeeps = emptyList()
         hidden = hidden + queued.map { it.uri.toString() }.toSet()
         queued = emptyList()
         DeckPrefs.setQueue(context, BROWSE_ROUTE, emptyList())
@@ -287,10 +308,6 @@ private fun BrowseContent(onBack: () -> Unit) {
             onDismiss = { previewItem = null }
         )
     }
-
-    previewUri?.let { uri ->
-        VideoPreviewSheet(videoUri = uri, onDismiss = { previewUri = null })
-    }
 }
 
 @Composable
@@ -328,20 +345,23 @@ private fun BrowseTile(
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         val x = offsetX.value
-                        scope.launch {
-                            when {
-                                x > thresholdPx -> {
+                        // Action first, fly-off in parallel — instant feedback
+                        when {
+                            x > thresholdPx -> {
+                                onSwipeRight()
+                                scope.launch {
                                     offsetX.animateTo(600f, tween(180))
-                                    onSwipeRight()
                                     offsetX.snapTo(0f)
                                 }
-                                x < -thresholdPx -> {
-                                    offsetX.animateTo(-600f, tween(180))
-                                    onSwipeLeft()
-                                    offsetX.snapTo(0f)
-                                }
-                                else -> offsetX.animateTo(0f, tween(180))
                             }
+                            x < -thresholdPx -> {
+                                onSwipeLeft()
+                                scope.launch {
+                                    offsetX.animateTo(-600f, tween(180))
+                                    offsetX.snapTo(0f)
+                                }
+                            }
+                            else -> scope.launch { offsetX.animateTo(0f, tween(180)) }
                         }
                     },
                     onDragCancel = { scope.launch { offsetX.snapTo(0f) } },
