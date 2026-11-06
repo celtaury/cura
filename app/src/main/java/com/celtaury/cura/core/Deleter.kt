@@ -64,9 +64,31 @@ private const val CHUNK = 100
 private fun firstReason(t: Throwable): String =
     t.message?.lineSequence()?.firstOrNull()?.take(90) ?: t.javaClass.simpleName
 
+/**
+ * Trash-first delete — the rule for EVERY path that removes a file without
+ * the system dialog. From Android 10 on, flipping IS_TRASHED to 1 keeps the
+ * file recoverable for ~30 days (identical outcome to Android 11+'s system
+ * dialog). Only rows that can't be trashed (ghosts, pending items) and
+ * Android 9- (no trash columns exist at all) fall through to a direct
+ * delete. Returns true when the row is gone from the gallery.
+ */
+private fun trashOrDelete(context: Context, uri: Uri): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val trashed = runCatching {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_TRASHED, 1)
+            }
+            context.contentResolver.update(uri, values, null, null) > 0
+        }.getOrDefault(false)
+        if (trashed) return true
+    }
+    val rows = context.contentResolver.delete(uri, null, null)
+    return rows > 0
+}
+
 @Composable
 fun rememberDeleteController(
-    onCleaned: () -> Unit,
+    onCleaned: (List<Uri>) -> Unit,
     onCancelled: () -> Unit = {}
 ): (List<Uri>) -> Unit {
     val context = LocalContext.current
@@ -96,26 +118,32 @@ fun rememberDeleteController(
                 ladder.onCancelled = onCancelled
                 ladder.start(uris)
             } else {
-                // Pre-Android 11: direct deletes, media permissions already granted
+                // Pre-Android 11: no system dialog. Android 10 trashes first
+                // (recoverable, same as everywhere else); Android 9- deletes
+                // directly — media permissions already granted there.
                 scope.launch {
-                    var failures = 0
+                    val done = mutableListOf<Uri>()
                     withContext(Dispatchers.IO) {
                         uris.forEach { u ->
-                            runCatching { context.contentResolver.delete(u, null, null) }
+                            // Boolean is pinned by the call itself; an
+                            // if-without-else as the runCatching tail left the
+                            // type parameter unmentionable for K2 (2 errors).
+                            runCatching { trashOrDelete(context, u) }
+                                .onSuccess { gone -> if (gone) done.add(u) }
                                 .onFailure { e ->
-                                    failures++
                                     Log.e(TAG, "Direct delete failed: $u", e)
                                 }
                         }
                     }
-                    when {
-                        failures == 0 -> onCleaned()
-                        failures == uris.size -> Toast.makeText(
+                    if (done.isNotEmpty()) {
+                        onCleaned(done.toList())
+                    } else {
+                        Toast.makeText(
                             context,
                             "This Android version blocked the delete 🥲",
                             Toast.LENGTH_LONG
                         ).show()
-                        else -> onCleaned() // partial success — the rescan shows the truth
+                        onCancelled()
                     }
                 }
             }
@@ -132,28 +160,32 @@ fun rememberDeleteController(
  * [MediaStore.createDeleteRequest], which is SDK-guarded right where it
  * happens — so the class itself carries no @RequiresApi and stays lint-clean
  * even though minSdk is 26.
+ *
+ * Success is tracked per-URI ([grantedUris]), not as a count: a user who
+ * grants one dialog and denies the next must not log the denied files as
+ * deleted — the trash log only ever hears about real deletions.
  */
 private class SystemDeleteLadder(
     private val context: Context,
     private val scope: CoroutineScope
 ) {
     var go: ((IntentSender) -> Unit)? = null
-    var onCleaned: (() -> Unit)? = null
+    var onCleaned: ((List<Uri>) -> Unit)? = null
     var onCancelled: (() -> Unit)? = null
 
     private val chunks = ArrayDeque<List<Uri>>()   // remaining batched dialogs
     private val singles = ArrayDeque<Uri>()        // remaining per-item requests
-    private var pendingCount = 0                   // items the in-flight dialog answers for
+    private var pendingUris = emptyList<Uri>()     // items the in-flight dialog answers for
     private var userStopped = false                // user denied a dialog — stop popping more
     private var dialogsShown = 0                   // dialogs that actually reached the user
-    private var granted = 0
-    private var denied = 0
+    private val grantedUris = mutableListOf<Uri>() // confirmed deleted (trashed or cleared)
+    private val deniedUris = mutableListOf<Uri>()  // refused by user or platform
 
     fun start(input: List<Uri>) {
         chunks.clear(); singles.clear()
-        pendingCount = 0
+        pendingUris = emptyList()
         userStopped = false
-        granted = 0; denied = 0
+        grantedUris.clear(); deniedUris.clear()
 
         val uris = sanitize(input)
         if (uris.isEmpty()) {
@@ -167,7 +199,9 @@ private class SystemDeleteLadder(
             val whole = tryRequest(uris)
             if (whole != null) {
                 Log.i(TAG, "System delete dialog for ${uris.size} item(s)")
-                launchBatch(whole, uris.size)
+                // the LIST goes in the dialog, not its size — launchBatch wants
+                // the URIs the dialog answers for (C3: was uris.size, an Int)
+                launchBatch(whole, uris)
                 return@launch
             }
 
@@ -184,7 +218,8 @@ private class SystemDeleteLadder(
                         TAG,
                         "Delete dialog for ${alive.size} item(s) after dropping ${dead.size} dead row(s)"
                     )
-                    launchBatch(pruned, alive.size)
+                    // C3: was alive.size (Int) — launchBatch needs the list
+                    launchBatch(pruned, alive)
                     return@launch
                 }
             }
@@ -208,12 +243,12 @@ private class SystemDeleteLadder(
 
     /** The system dialog (batch / chunk / single) came back. */
     fun onDialogResult(ok: Boolean) {
-        val count = pendingCount
-        pendingCount = 0
+        val answered = pendingUris
+        pendingUris = emptyList()
         if (ok) {
-            granted += count
+            grantedUris += answered
         } else {
-            denied += count
+            deniedUris += answered
             userStopped = true
         }
         launchNext()
@@ -221,8 +256,8 @@ private class SystemDeleteLadder(
 
     /** A dialog could not even be launched (app backgrounded, etc.) — safe stop. */
     fun stop(reason: String?) {
-        if (granted > 0) {
-            onCleaned?.invoke()
+        if (grantedUris.isNotEmpty()) {
+            onCleaned?.invoke(grantedUris.toList())
         } else {
             Toast.makeText(
                 context,
@@ -243,9 +278,8 @@ private class SystemDeleteLadder(
         if (single != null) {
             val pi = tryRequest(listOf(single))
             if (pi != null) {
-                pendingCount = 1
                 dialogsShown++
-                go?.invoke(pi.intentSender)
+                launchBatch(pi, listOf(single))
             } else {
                 scope.launch(Dispatchers.IO) { directDelete(single) }
             }
@@ -257,7 +291,7 @@ private class SystemDeleteLadder(
             val pi = tryRequest(chunk)
             if (pi != null) {
                 Log.i(TAG, "Chunked delete dialog for ${chunk.size} item(s)")
-                launchBatch(pi, chunk.size)
+                launchBatch(pi, chunk)
             } else {
                 Log.e(TAG, "Chunk refused (${chunk.size} items) — going item-by-item")
                 singles.addAll(chunk)
@@ -271,22 +305,22 @@ private class SystemDeleteLadder(
 
     private suspend fun directDelete(uri: Uri) {
         try {
-            val rows = context.contentResolver.delete(uri, null, null)
-            Log.i(TAG, "Direct delete $uri → $rows row(s)")
-            if (rows > 0) granted++ else denied++
+            val gone = trashOrDelete(context, uri)
+            Log.i(TAG, "Direct delete $uri → ${if (gone) "trashed/cleared" else "refused"}")
+            if (gone) grantedUris += uri else deniedUris += uri
         } catch (e: SecurityException) {
             // needs user consent that this flow can't provide — give up on it
             Log.e(TAG, "Direct delete blocked for $uri", e)
-            denied++
+            deniedUris += uri
         } catch (e: Exception) {
             Log.e(TAG, "Direct delete failed for $uri", e)
-            denied++
+            deniedUris += uri
         }
         withContext(Dispatchers.Main) { launchNext() }
     }
 
-    private fun launchBatch(pi: PendingIntent, count: Int) {
-        pendingCount = count
+    private fun launchBatch(pi: PendingIntent, uris: List<Uri>) {
+        pendingUris = uris
         dialogsShown++
         go?.invoke(pi.intentSender)
     }
@@ -304,13 +338,16 @@ private class SystemDeleteLadder(
         }
 
     private fun finish() {
-        Log.i(TAG, "Delete finished: $granted granted, $denied refused, $dialogsShown dialog(s) shown")
-        if (granted > 0) {
-            onCleaned?.invoke()
+        Log.i(
+            TAG,
+            "Delete finished: ${grantedUris.size} granted, ${deniedUris.size} refused, $dialogsShown dialog(s) shown"
+        )
+        if (grantedUris.isNotEmpty()) {
+            onCleaned?.invoke(grantedUris.toList())
         } else {
             // Only speak up when nothing reached the user at all — a deliberate
             // "No" on the system dialog stays silent, that was their choice.
-            if (denied > 0 && dialogsShown == 0) {
+            if (deniedUris.isNotEmpty() && dialogsShown == 0) {
                 Toast.makeText(
                     context,
                     "Android refused to delete these files 🥲",
@@ -338,13 +375,14 @@ private class SystemDeleteLadder(
 }
 
 /**
- * Best-effort "Undo": on Android 11+ media deletions land in the system Trash,
- * so we try to flip IS_TRASHED back. Returns the number of restored files.
+ * Best-effort "Undo": from Android 10 on, Cura's deletions land in the system
+ * Trash (IS_TRASHED — see [trashOrDelete]), so we flip it back. Returns the
+ * number of restored files. Android 9- keeps no trash — nothing to restore.
  * If the platform refuses, callers show the "open Files app → Trash" hint.
  */
 suspend fun tryRestoreFromTrash(context: Context, uris: List<Uri>): Int =
     withContext(Dispatchers.IO) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return@withContext 0
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@withContext 0
         var restored = 0
         uris.forEach { u ->
             runCatching {

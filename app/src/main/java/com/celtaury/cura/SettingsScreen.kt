@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -27,7 +30,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -43,8 +48,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.celtaury.cura.core.CuraLinks
+import com.celtaury.cura.core.InstantDeletePrefs
 import com.celtaury.cura.core.ThemePrefs
 import com.celtaury.cura.core.hasMediaAccess
+import com.celtaury.cura.core.isPartialMediaAccess
+import com.celtaury.cura.core.mediaPermissions
 import com.celtaury.cura.ui.theme.InterBlack
 
 /**
@@ -61,7 +70,22 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     val themeMode = ThemePrefs.mode
 
     var mediaOk by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) { mediaOk = hasMediaAccess(context) }
+    var partialMedia by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        InstantDeletePrefs.load(context)
+        mediaOk = hasMediaAccess(context)
+        partialMedia = mediaOk && isPartialMediaAccess(context)
+    }
+
+    // Android 14+ partial access: offer the upgrade to "Allow all" in place.
+    val permLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        mediaOk = hasMediaAccess(context)
+        partialMedia = mediaOk && isPartialMediaAccess(context)
+    }
+
+    val instant = InstantDeletePrefs.enabled
 
     Scaffold(
         containerColor = cs.background,
@@ -120,13 +144,26 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             // ── Permissions ──
             SectionCard(title = "Permissions") {
                 Text(
-                    if (mediaOk)
-                        "✅ Photo access granted — Cura can see your media."
-                    else
-                        "⚠️ Photo access is off — Cura can't see anything yet.",
+                    when {
+                        mediaOk && !partialMedia ->
+                            "✅ Photo access granted — Cura can see your media."
+                        mediaOk ->
+                            "🟡 Cura sees only the photos you picked. Allow all " +
+                                "so nothing gets missed."
+                        else ->
+                            "⚠️ Photo access is off — Cura can't see anything yet."
+                    },
                     fontSize = 13.sp
                 )
                 Spacer(Modifier.height(10.dp))
+                if (mediaOk && partialMedia) {
+                    Button(
+                        onClick = { permLauncher.launch(mediaPermissions()) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = MaterialTheme.shapes.large
+                    ) { Text("Allow all photos") }
+                    Spacer(Modifier.height(6.dp))
+                }
                 Button(
                     onClick = {
                         runCatching {
@@ -145,6 +182,35 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 ) { Text("Open Android app settings") }
             }
 
+            // ── Deletion style (Batch C): the confidence dial ──
+            SectionCard(title = "Deletion style") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Instant delete",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Skip Cura's “are you sure?” sheet — one tap and " +
+                                "it's out of sight. Android may still ask on its " +
+                                "own dialog, and everything stays recoverable in " +
+                                "Trash & recovery for ~30 days.",
+                            fontSize = 12.sp,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = instant,
+                        onCheckedChange = { InstantDeletePrefs.set(context, it) }
+                    )
+                }
+            }
+
             // ── Trash & recovery (elderly-friendly, UX v2 decision 27) ──
             SectionCard(title = "Deleted something by accident?") {
                 Text(
@@ -157,6 +223,11 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 )
                 Spacer(Modifier.height(10.dp))
                 Button(
+                    onClick = { onNavigate("trash") },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = MaterialTheme.shapes.large
+                ) { Text("Show what's in the trash") }
+                TextButton(
                     onClick = {
                         val ok = runCatching {
                             val intent = Intent(Intent.ACTION_VIEW)
@@ -171,9 +242,40 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                             ).show()
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = MaterialTheme.shapes.large
-                ) { Text("Open the Files app") }
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Or open the Files app instead") }
+            }
+
+            // ── Support (Batch B — transparent earning: no ads, no data selling) ──
+            SectionCard(title = "Support Cura 💚") {
+                Text(
+                    "Cura is free, shows no ads, and never sells your data. " +
+                        "If it saved you space — and a little stress — a small " +
+                        "donation keeps it that way.",
+                    fontSize = 13.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                if (CuraLinks.DONATION_URL.isBlank()) {
+                    Text(
+                        "Donation link coming soon — nothing to tap yet 🙂",
+                        fontSize = 12.sp,
+                        color = cs.onSurfaceVariant
+                    )
+                } else {
+                    Button(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(CuraLinks.DONATION_URL))
+                                )
+                            }.onFailure {
+                                Toast.makeText(context, "Couldn't open the link", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = MaterialTheme.shapes.large
+                    ) { Text("Support the project") }
+                }
             }
 
             // ── Your data ──
@@ -183,7 +285,7 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "CURA v0.8 · flow build — storage care, not storage stress.",
+                "CURA v${BuildConfig.VERSION_NAME} · flow build — storage care, not storage stress.",
                 fontSize = 12.sp,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp)

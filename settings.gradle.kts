@@ -20,7 +20,6 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
-        maven("https://maven.aliyun.com/repository/public")
         maven("https://maven-central.storage-download.googleapis.com/maven2") // Google mirror of Maven Central
         maven("https://maven.aliyun.com/repository/public")                    // Alibaba mirror (backup)
         mavenCentral()

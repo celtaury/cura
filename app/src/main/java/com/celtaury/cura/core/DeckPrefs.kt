@@ -42,4 +42,12 @@ object DeckPrefs {
             .remove("q_$deckId")
             .apply()
     }
+
+    /** First-run coach marks (Batch C): shown once, ever, per install. */
+    fun coachDone(context: Context): Boolean =
+        prefs(context).getBoolean("coach_done", false)
+
+    fun setCoachDone(context: Context) {
+        prefs(context).edit().putBoolean("coach_done", true).apply()
+    }
 }

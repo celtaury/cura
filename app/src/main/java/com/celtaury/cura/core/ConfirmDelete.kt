@@ -30,17 +30,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * In-app bulk delete confirmation (#6): shows exactly what is about to be
@@ -48,6 +52,10 @@ import kotlinx.coroutines.delay
  *
  * Every flow calls this instead of the raw delete controller — including the
  * swipe deck's summary, so selected items are always confirmed in-app first.
+ * On success the batch lands in [TrashLog], which powers the Trash screen.
+ *
+ * Batch C: with [InstantDeletePrefs] enabled, the sheet is skipped entirely —
+ * the same system flow (and the same trash log) fires straight away.
  *
  * Usage:
  *   val delete = rememberConfirmableDelete(onCleaned = { ... })
@@ -59,17 +67,51 @@ fun rememberConfirmableDelete(
     onCleaned: () -> Unit,
     onCancelled: () -> Unit = {}
 ): (List<MediaItem>) -> Unit {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<List<MediaItem>?>(null) }
+    // The batch now facing the system dialog — kept so the recently-deleted
+    // log can be written the moment Android reports success (Batch B).
+    var inFlight by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     val systemDelete = rememberDeleteController(
-        onCleaned = onCleaned,
+        onCleaned = { deletedUris ->
+            // Only the URIs Android actually deleted land in the log — a
+            // batch the user half-denied must not pollute Trash & recovery.
+            val gone = deletedUris.toSet()
+            // Uri vs Set<Uri> — comparing uri.toString() (String) against this
+            // set is a K2 type-parameter inference error, caught on device.
+            val batch = inFlight.filter { it.uri in gone }
+            if (batch.isNotEmpty()) {
+                scope.launch(Dispatchers.IO) {
+                    TrashLog.record(
+                        context,
+                        batch.map { item ->
+                            TrashLog.Entry(
+                                uri = item.uri.toString(),
+                                name = item.displayName,
+                                bytes = item.sizeBytes,
+                                trashedAtMs = System.currentTimeMillis()
+                            )
+                        }
+                    )
+                }
+            }
+            onCleaned()
+        },
         onCancelled = onCancelled
     )
 
+    // Instant delete (Batch C): confident users skip the sheet entirely.
+    // Same system flow, same trash log — just without the "are you sure?".
+    LaunchedEffect(Unit) { InstantDeletePrefs.load(context) }
+    val instant = InstantDeletePrefs.enabled
+
     val candidates = pending
-    if (candidates != null) {
+    if (candidates != null && !instant) {
         ConfirmDeleteSheet(
             items = candidates,
             onConfirm = {
+                inFlight = candidates
                 pending = null
                 systemDelete(candidates.map { it.uri })
             },
@@ -78,6 +120,16 @@ fun rememberConfirmableDelete(
                 onCancelled()
             }
         )
+    }
+
+    // Instant mode: the picked batch fires straight through the SAME system
+    // flow — inFlight is set first so success still writes the trash log.
+    LaunchedEffect(candidates, instant) {
+        if (instant && candidates != null) {
+            inFlight = candidates
+            pending = null
+            systemDelete(candidates.map { it.uri })
+        }
     }
 
     return remember(onCleaned) {

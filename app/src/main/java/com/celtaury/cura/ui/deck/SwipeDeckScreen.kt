@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -63,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -73,6 +76,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.DeckPrefs
 import com.celtaury.cura.core.KeepSafe
@@ -304,6 +309,15 @@ private fun DeckContent(
         }
     })
 
+    // First-run coach marks (Batch C): teach the three gestures once, ever.
+    var showCoach by remember { mutableStateOf(!DeckPrefs.coachDone(context)) }
+    if (showCoach && phase == "deck") {
+        DeckCoachMarks(onDone = {
+            showCoach = false
+            DeckPrefs.setCoachDone(context)
+        })
+    }
+
     Scaffold(
         containerColor = cs.background,
         snackbarHost = { SnackbarHost(snack) },
@@ -490,6 +504,12 @@ private fun DeckPhase(
     val cs = MaterialTheme.colorScheme
     val current = items.getOrNull(index)
 
+    // Swipe side glow (Batch C2 prototype): -1f = card being thrown left
+    // (clean → red), +1f = thrown right (keep → green). Written by the top
+    // card's drag, read only inside the glow's draw phase — no recomposition
+    // per drag frame.
+    val swipeGlow = remember { mutableStateOf(0f) }
+
     // Purge pill pulse: bump-scale the thumb-zone CTA each time the queue
     // grows, so it announces itself while you judge. Also fires once on
     // entry when a saved queue was restored.
@@ -521,6 +541,9 @@ private fun DeckPhase(
                 .weight(1f),
             contentAlignment = Alignment.Center
         ) {
+            // the side being thrown toward lights up (prototype knobs live in
+            // DeckSideGlow below — restyle freely)
+            DeckSideGlow(progress = { swipeGlow.value })
             // next cards peeking behind
             for (depth in 2 downTo 1) {
                 val next = items.getOrNull(index + depth)
@@ -554,7 +577,8 @@ private fun DeckPhase(
                             .aspectRatio(0.72f),
                         interactive = true,
                         onDecide = onDecide,
-                        onPreview = onPreview
+                        onPreview = onPreview,
+                        onDragProgress = { swipeGlow.value = it }
                     )
                 }
             }
@@ -636,7 +660,8 @@ internal fun DeckCard(
     modifier: Modifier = Modifier,
     interactive: Boolean,
     onDecide: (MediaItem, String) -> Unit,
-    onPreview: (MediaItem) -> Unit
+    onPreview: (MediaItem) -> Unit,
+    onDragProgress: ((Float) -> Unit)? = null
 ) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -654,6 +679,9 @@ internal fun DeckCard(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
+                        // the glow belongs to the drag — release it the moment
+                        // the finger lifts, whichever way the card flies
+                        onDragProgress?.invoke(0f)
                         val x = offsetX.value
                         scope.launch {
                             when {
@@ -669,10 +697,19 @@ internal fun DeckCard(
                             }
                         }
                     },
-                    onDragCancel = { scope.launch { offsetX.animateTo(0f, spring()) } },
+                    onDragCancel = {
+                        onDragProgress?.invoke(0f)
+                        scope.launch { offsetX.animateTo(0f, spring()) }
+                    },
                     onHorizontalDrag = { change, amount ->
                         change.consume()
-                        scope.launch { offsetX.snapTo(offsetX.value + amount) }
+                        scope.launch {
+                            offsetX.snapTo(offsetX.value + amount)
+                            // -1f..1f: how far into a full throw this drag is
+                            onDragProgress?.invoke(
+                                (offsetX.value / thresholdPx).coerceIn(-1f, 1f)
+                            )
+                        }
                     }
                 )
             }
@@ -803,6 +840,65 @@ private fun SwipeHint(text: String, color: Color, modifier: Modifier = Modifier,
         fontSize = 22.sp,
         modifier = modifier.graphicsLayer { this.alpha = alpha }
     )
+}
+
+/**
+ * Swipe side glow — PROTOTYPE (Batch C2). The side the card is being thrown
+ * toward lights up: green on the right (keep safe), red on the left (clean).
+ *
+ * Deliberately plain so the UI pass can restyle it freely — every knob is in
+ * the marked block below, and the only contract is [progress]: -1f..1f,
+ * read per frame inside the draw phase (a drag never recomposes this).
+ *   · negative → left (delete) glow · positive → right (save) glow
+ *   · magnitude → strength, eased quadratically so it ramps in softly
+ */
+@Composable
+private fun DeckSideGlow(
+    progress: () -> Float,
+    modifier: Modifier = Modifier
+) {
+    // ── knobs for the UI pass ──────────────────────────────
+    val saveGlowColor = Color(0xFF2ECC71)   // green — thrown right
+    val deleteGlowColor = Color(0xFFFF4D4F) // red — thrown left
+    val glowWidthFraction = 0.45f           // each side's share of the deck
+    val glowMaxAlpha = 0.60f                // ceiling at a full throw
+    // ───────────────────────────────────────────────────────
+
+    Box(modifier.fillMaxSize()) {
+        // left — delete
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(glowWidthFraction)
+                .graphicsLayer {
+                    val p = (-progress()).coerceIn(0f, 1f)
+                    alpha = p * p * glowMaxAlpha
+                }
+                .background(
+                    Brush.horizontalGradient(
+                        0f to deleteGlowColor,
+                        1f to Color.Transparent
+                    )
+                )
+        )
+        // right — keep
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .fillMaxWidth(glowWidthFraction)
+                .graphicsLayer {
+                    val p = progress().coerceIn(0f, 1f)
+                    alpha = p * p * glowMaxAlpha
+                }
+                .background(
+                    Brush.horizontalGradient(
+                        0f to Color.Transparent,
+                        1f to saveGlowColor
+                    )
+                )
+        )
+    }
 }
 
 // ───────────────────────── month picker (#7) ─────────────────────────
@@ -1009,6 +1105,64 @@ private fun DonePhase(sessionSaved: Long, allTimeSaved: Long, onBack: () -> Unit
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = MaterialTheme.shapes.large
         ) { Text("Done", fontWeight = FontWeight.Bold) }
+    }
+}
+
+/**
+ * First-run coach marks (Batch C): one overlay teaching the three deck
+ * gestures in plain words. Shown once ever (DeckPrefs); tap anywhere or
+ * "Got it" to dismiss.
+ */
+@Composable
+private fun DeckCoachMarks(onDone: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Dialog(
+        onDismissRequest = onDone,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(cs.scrim.copy(alpha = 0.6f))
+                .pointerInput(Unit) { detectTapGestures { onDone() } }
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = cs.surface)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text(
+                        "How this works",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "👈 Swipe left — mark for cleaning\n" +
+                            "👉 Swipe right — keep safe\n" +
+                            "👆 Tap a card — look closer first",
+                        fontSize = 15.sp,
+                        lineHeight = 26.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Nothing is deleted until you tap Clean — and it stays " +
+                            "recoverable for ~30 days.",
+                        fontSize = 12.sp,
+                        color = cs.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = onDone,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = MaterialTheme.shapes.large
+                    ) { Text("Got it", fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
     }
 }
 

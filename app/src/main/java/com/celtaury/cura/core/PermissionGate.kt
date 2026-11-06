@@ -6,13 +6,19 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +69,24 @@ fun hasMediaAccess(context: android.content.Context): Boolean {
     }
 }
 
+/**
+ * True when access came only from Android 14's "Select photos" flow — Cura
+ * sees the picked few, everything else is hidden. Batch C coaches this state
+ * toward a full allow instead of silently working with a partial library.
+ */
+fun isPartialMediaAccess(context: android.content.Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return false
+    val selected = ContextCompat.checkSelfPermission(context, partialPerm) ==
+        PackageManager.PERMISSION_GRANTED
+    val images = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_MEDIA_IMAGES
+    ) == PackageManager.PERMISSION_GRANTED
+    val videos = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_MEDIA_VIDEO
+    ) == PackageManager.PERMISSION_GRANTED
+    return selected && !(images && videos)
+}
+
 @Composable
 fun PermissionGate(
     title: String,
@@ -72,6 +96,10 @@ fun PermissionGate(
     val context = LocalContext.current
     var granted by remember { mutableStateOf(false) }
     var askedOnce by remember { mutableStateOf(false) }
+    // Android 14+ partial access: we keep working with the picked few, but
+    // a small card keeps offering "Allow all" (Batch C coaching).
+    var partial by remember { mutableStateOf(false) }
+    var coachDismissed by remember { mutableStateOf(false) }
 
     val perms = mediaPermissions()
 
@@ -79,10 +107,12 @@ fun PermissionGate(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
         granted = hasMediaAccess(context)
+        partial = granted && isPartialMediaAccess(context)
     }
 
     LaunchedEffect(Unit) {
         granted = hasMediaAccess(context)
+        partial = granted && isPartialMediaAccess(context)
         if (!granted) {
             askedOnce = true
             launcher.launch(perms)
@@ -90,7 +120,43 @@ fun PermissionGate(
     }
 
     if (granted) {
-        content()
+        Column(Modifier.fillMaxWidth()) {
+            if (partial && !coachDismissed) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text(
+                            "Only some photos are shared with Cura",
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "You picked a few — the rest stay hidden from " +
+                                "cleaning. Allow all so nothing gets missed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Button(
+                                onClick = { launcher.launch(perms) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Allow all") }
+                            Spacer(Modifier.width(8.dp))
+                            TextButton(onClick = { coachDismissed = true }) {
+                                Text("Later")
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            content()
+        }
     } else {
         Column(
             modifier = Modifier

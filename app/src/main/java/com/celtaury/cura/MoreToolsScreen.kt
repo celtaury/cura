@@ -139,6 +139,12 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
             MenuRow(title = "Manage Keep-safe 🛡️", subtitle = "See and unprotect saved files") {
                 onNavigate("keepsafe")
             }
+            MenuRow(
+                title = "Trash & recovery 🗑️",
+                subtitle = "Bring back files a clean deleted — before the ~30 days end"
+            ) {
+                onNavigate("trash")
+            }
             MenuRow(title = "Reset saved-counter", subtitle = "Start the impact counter fresh") {
                 showReset = true
             }
@@ -176,7 +182,7 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
                 Column(Modifier.fillMaxWidth().padding(20.dp)) {
                     Text("CURA", fontFamily = InterBlack, fontSize = 18.sp)
                     Text(
-                        "Storage care, not storage stress. v0.8 · flow build.",
+                        "Storage care, not storage stress. v${BuildConfig.VERSION_NAME} · flow build.",
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant
                     )

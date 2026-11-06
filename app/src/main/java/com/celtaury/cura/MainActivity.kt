@@ -91,6 +91,7 @@ private fun CuraNav() {
         route == "compress" -> CompressScreen(onBack = goBack)
         route == "social" -> SocialCleanerScreen(onBack = goBack, onNavigate = navigate)
         route == "keepsafe" -> KeepSafeScreen(onBack = goBack)
+        route == "trash" -> TrashScreen(onBack = goBack)
         route == "more" -> MoreToolsScreen(onBack = goBack, onNavigate = navigate)
         route == "settings" -> SettingsScreen(onBack = goBack, onNavigate = navigate)
         route == "browse_gallery" -> BrowseGalleryScreen(onBack = goBack)

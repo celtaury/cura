@@ -1,0 +1,478 @@
+package com.celtaury.cura
+
+import android.content.ContentResolver
+import android.content.ContentUris
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.celtaury.cura.core.TrashLog
+import com.celtaury.cura.core.humanBytes
+import com.celtaury.cura.core.tryRestoreFromTrash
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * One row in the recovery list. Two sources feed it:
+ *  - fromLog = true  → Cura's own recently-deleted log (always available)
+ *  - fromLog = false → a row the system trash query actually returned (bonus)
+ */
+private data class TrashedFile(
+    val uri: Uri,
+    val name: String,
+    val bytes: Long,
+    /** Epoch ms Android purges it (exact for live rows, ~30-day estimate for log rows). */
+    val expiresAt: Long?,
+    /** When Cura deleted it (log rows only). */
+    val trashedAtMs: Long?,
+    val fromLog: Boolean
+)
+
+/**
+ * Trash & recovery (Batch B): everything Cura deleted recently, restorable
+ * in one tap — no trip to the Files app required.
+ *
+ * Honest-data design: Android hides most of the system trash from third-party
+ * apps (and only Android 11+ lets us even ask for trash-only rows, which some
+ * OEMs answer with zero rows). So the PRIMARY source is Cura's own log of
+ * what it deleted (what / when / size); system-trash rows are merged in when
+ * Android returns them. The screen copy says exactly that.
+ *
+ * Written to the elderly test: short words, big buttons — and deliberately
+ * NO "empty trash": this screen only gives files back, never destroys.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TrashScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+
+    val files = remember { mutableStateListOf<TrashedFile>() }
+    var loading by remember { mutableStateOf(true) }
+    // Android 9 and older keep no queryable trash — fall back to instructions.
+    var listSupported by remember { mutableStateOf(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) }
+    var restoring by remember { mutableStateOf(false) }
+
+    // Log first (always works), system-trash rows merged in as a bonus.
+    suspend fun reload() = withContext(Dispatchers.IO) {
+        val logged = TrashLog.entries(context).map { entry ->
+            TrashedFile(
+                uri = Uri.parse(entry.uri),
+                name = entry.name,
+                bytes = entry.bytes,
+                expiresAt = entry.trashedAtMs + TrashLog.TRASH_WINDOW_DAYS * 86_400_000L,
+                trashedAtMs = entry.trashedAtMs,
+                fromLog = true
+            )
+        }
+        val seenUris = logged.map { it.uri.toString() }.toSet()
+        val live = queryTrash(context).filter { row -> row.uri.toString() !in seenUris }
+        files.clear()
+        files.addAll(logged + live)
+    }
+
+    LaunchedEffect(Unit) {
+        if (listSupported) reload()
+        loading = false
+    }
+
+    fun requestRestore(picked: List<TrashedFile>) {
+        if (restoring || picked.isEmpty()) return
+        restoring = true
+        scope.launch {
+            val total = picked.size
+            val restored = tryRestoreFromTrash(context, picked.map { it.uri })
+            when {
+                restored == total -> {
+                    val word = if (total == 1) "file" else "files"
+                    Toast.makeText(
+                        context,
+                        "Back in your gallery: $restored $word 🌿",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                restored > 0 ->
+                    Toast.makeText(
+                        context,
+                        "Restored $restored of $total — the rest may need the Files app → Trash",
+                        Toast.LENGTH_LONG
+                    ).show()
+                else ->
+                    Toast.makeText(
+                        context,
+                        "Android kept them locked — open the Files app → Trash to restore",
+                        Toast.LENGTH_LONG
+                    ).show()
+            }
+            if (restored > 0) {
+                withContext(Dispatchers.IO) {
+                    TrashLog.removeRestored(context, picked.map { it.uri.toString() }.toSet())
+                }
+            }
+            reload()
+            restoring = false
+        }
+    }
+
+    fun openFilesApp() {
+        val ok = runCatching {
+            val intent = Intent(Intent.ACTION_VIEW)
+            intent.setPackage("com.google.android.documentsui")
+            context.startActivity(intent)
+        }.isSuccess
+        if (!ok) {
+            Toast.makeText(
+                context,
+                "Open your Files app, then look for “Trash”",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    Scaffold(
+        containerColor = cs.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Trash & recovery", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text(
+                            "Everything Cura deleted — back in one tap",
+                            fontSize = 12.sp,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+        ) {
+            when {
+                // ── Pre-Android-10: no queryable trash, same honest instructions ──
+                !listSupported -> {
+                    Spacer(Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = cs.surface)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+                            Text(
+                                "This Android keeps its trash in the Files app",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "1. Open your Files app\n" +
+                                    "2. Tap Library or Menu\n" +
+                                    "3. Tap Trash — restore what you miss",
+                                fontSize = 13.sp
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Button(
+                                onClick = { openFilesApp() },
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                shape = MaterialTheme.shapes.large
+                            ) { Text("Open the Files app") }
+                        }
+                    }
+                }
+
+                loading ->
+                    Text(
+                        "Looking into the trash…",
+                        fontSize = 13.sp,
+                        color = cs.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 40.dp)
+                    )
+
+                // ── Empty: reassure, and explain what WILL happen ──
+                files.isEmpty() -> {
+                    Spacer(Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = cs.surface)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                            Text("Nothing waiting right now 🌿", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "When Cura deletes something, it is listed here for " +
+                                    "about 30 days — and you can bring it back with one tap.",
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
+                // ── The list: Cura's log first, soonest-to-vanish first ──
+                else -> {
+                    val totalBytes = files.sumOf { it.bytes }
+                    val noun = if (files.size == 1) "file" else "files"
+                    Text(
+                        "${files.size} $noun · ${humanBytes(totalBytes)} waiting",
+                        fontSize = 13.sp,
+                        color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 8.dp)
+                    )
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(files, key = { it.uri.toString() }) { file ->
+                            TrashRow(file = file, onRestore = { requestRestore(listOf(file)) })
+                        }
+                    }
+                    Button(
+                        onClick = { requestRestore(files.toList()) },
+                        enabled = !restoring,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .height(52.dp),
+                        shape = MaterialTheme.shapes.large
+                    ) {
+                        Text(
+                            if (restoring) "Bringing them back…" else "Restore everything",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    TextButton(
+                        onClick = { openFilesApp() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Or open the Files app") }
+                    Text(
+                        "Cura lists everything it deleted here. Android hides the " +
+                            "rest of the phone's trash from apps — your Files app " +
+                            "shows the full picture. Files vanish for good only " +
+                            "when Android clears the trash; Cura never does.",
+                        fontSize = 11.sp,
+                        color = cs.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrashRow(file: TrashedFile, onRestore: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val thumbFallback = rememberVectorPainter(Icons.Default.Description)
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.surface)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = file.uri,
+                contentDescription = file.name,
+                error = thumbFallback,
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                contentScale = ContentScale.Crop
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    file.name,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    metaLine(file),
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = onRestore) { Text("Restore") }
+        }
+    }
+}
+
+/** "deleted 2 days ago · 1.4 MB · purges in ~28 days" — plain, honest words. */
+private fun metaLine(file: TrashedFile): String {
+    val parts = mutableListOf<String>()
+    if (file.fromLog && file.trashedAtMs != null) parts.add(agoLabel(file.trashedAtMs))
+    parts.add(humanBytes(file.bytes))
+    parts.add(purgeLabel(file))
+    return parts.joinToString(" · ")
+}
+
+private fun agoLabel(trashedAtMs: Long): String {
+    val days = (System.currentTimeMillis() - trashedAtMs) / 86_400_000L
+    return when {
+        days <= 0 -> "deleted today"
+        days == 1L -> "deleted yesterday"
+        else -> "deleted $days days ago"
+    }
+}
+
+/** Days left before Android purges it; null when we simply don't know. */
+private fun purgeLabel(file: TrashedFile): String {
+    val now = System.currentTimeMillis()
+    val daysLeft: Long? = when {
+        file.fromLog && file.trashedAtMs != null ->
+            ((file.trashedAtMs + TrashLog.TRASH_WINDOW_DAYS * 86_400_000L - now) / 86_400_000L)
+                .coerceAtLeast(0L)
+        !file.fromLog && file.expiresAt != null ->
+            ((file.expiresAt - now) / 86_400_000L).coerceAtLeast(0L)
+        else -> null
+    }
+    return when {
+        daysLeft == null -> "recoverable"
+        daysLeft <= 0 -> "purges any day now"
+        daysLeft == 1L -> "purges tomorrow"
+        file.fromLog -> "purges in ~$daysLeft days"
+        else -> "purges in $daysLeft days"
+    }
+}
+
+/**
+ * Best-effort peek at the system trash — a BONUS on top of Cura's own log,
+ * never the promise. Android 11+ must be told to return trashed rows at all
+ * (QUERY_ARG_MATCH_TRASHED / MATCH_ONLY); Android 10 honors the plain
+ * IS_TRASHED selection. Either way an OEM may return nothing — handled.
+ */
+private suspend fun queryTrash(context: Context): List<TrashedFile> =
+    withContext(Dispatchers.IO) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@withContext emptyList()
+        val onR = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        val found = mutableListOf<TrashedFile>()
+        val collections = listOf(
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        )
+        for (collection in collections) {
+            val projection = mutableListOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE
+            )
+            if (onR) projection.add(MediaStore.MediaColumns.DATE_EXPIRES)
+            val cursor = runCatching {
+                if (onR) {
+                    val bundle = Bundle().apply {
+                        putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
+                        putString(
+                            ContentResolver.QUERY_ARG_SQL_SORT_ORDER,
+                            "${MediaStore.MediaColumns.DATE_EXPIRES} ASC"
+                        )
+                    }
+                    context.contentResolver.query(collection, projection.toTypedArray(), bundle, null)
+                } else {
+                    context.contentResolver.query(
+                        collection,
+                        projection.toTypedArray(),
+                        "${MediaStore.MediaColumns.IS_TRASHED} = 1",
+                        null,
+                        null
+                    )
+                }
+            }.getOrNull() ?: runCatching {
+                // OEM refused the bundle — fall back to the plain selection
+                context.contentResolver.query(
+                    collection,
+                    projection.toTypedArray(),
+                    "${MediaStore.MediaColumns.IS_TRASHED} = 1",
+                    null,
+                    null
+                )
+            }.getOrNull()
+            cursor?.use { reader ->
+                val idCol = reader.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameCol = reader.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val sizeCol = reader.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                val expCol = if (onR) reader.getColumnIndex(MediaStore.MediaColumns.DATE_EXPIRES) else -1
+                while (reader.moveToNext()) {
+                    val expires = if (onR && expCol >= 0 && !reader.isNull(expCol)) {
+                        // MediaStore timestamps are in seconds; we compare in millis
+                        reader.getLong(expCol) * 1000L
+                    } else {
+                        null
+                    }
+                    found.add(
+                        TrashedFile(
+                            uri = ContentUris.withAppendedId(collection, reader.getLong(idCol)),
+                            name = reader.getString(nameCol)?.ifBlank { "(file)" } ?: "(file)",
+                            bytes = if (reader.isNull(sizeCol)) 0L else reader.getLong(sizeCol),
+                            expiresAt = expires,
+                            trashedAtMs = null,
+                            fromLog = false
+                        )
+                    )
+                }
+            }
+        }
+        found.sortedWith(compareBy { it.expiresAt ?: Long.MAX_VALUE })
+    }

@@ -111,7 +111,7 @@ import kotlin.math.roundToInt
  * - Swiping right saves/protects the item to Keep-safe (with instant Undo action)
  * - Clicking thumbnail opens instant Apple Quick Look-style media preview
  * - Persistent delete queue saved across app restarts
- * - Persistent floating bar with "Delete Selected" and confirmation dialog
+ * - Persistent floating bar with "Delete selected" and confirmation dialog
  */
 /** One Keep-safe action that can still be undone (burst-style, list edition).
  *  Named per-file (Social…) — K2 flags same-name top-level classes as redeclaration
@@ -122,7 +122,9 @@ private data class SocialPendingKeep(val item: MediaItem, val wasQueued: Boolean
 fun SocialCleanerScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     PermissionGate(
         title = "Social Cleaner",
-        description = "WhatsApp loves to hoard memes and voice notes. See exactly what it's keeping, then easily clean or keep safe."
+        description = "WhatsApp quietly collects memes, videos and voice notes. " +
+            "See everything it's holding, swipe left on what you don't need — " +
+            "and swipe right to keep the rest safe. Protected files can never be deleted."
     ) {
         SocialCleanerContent(onBack)
     }
@@ -311,7 +313,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(20.dp))
                     Text(
-                        "Auditing WhatsApp media…",
+                        "Looking through WhatsApp…",
                         style = MaterialTheme.typography.titleMedium,
                         color = cs.onSurfaceVariant
                     )
@@ -406,13 +408,13 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        "Found ${items.size} chat files",
+                                        "WhatsApp is holding ${items.size} files",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 15.sp,
                                         color = cs.onSurface
                                     )
                                     Text(
-                                        "${humanBytes(totalBytes)} total · ${queuedUris.size} queued (saved)",
+                                        "${humanBytes(totalBytes)} total · ${queuedUris.size} selected for delete",
                                         fontSize = 12.sp,
                                         color = if (queuedUris.isNotEmpty()) cs.error else cs.onSurfaceVariant
                                     )
@@ -630,7 +632,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     if (queuedUris.isNotEmpty())
-                                        "${queuedUris.size} queued"
+                                        "${queuedUris.size} selected"
                                     else
                                         "${displayedItems.size} items",
                                     fontWeight = FontWeight.Bold,
@@ -664,7 +666,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        "Delete Queued (${queuedUris.size})",
+                                        "Delete selected (${queuedUris.size})",
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -684,7 +686,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Queue All", fontWeight = FontWeight.Bold)
+                                    Text("Select all", fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
