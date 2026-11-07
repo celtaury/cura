@@ -2,7 +2,7 @@
 
 # Cura
 
-![Cura Banner](images/Frame-2106667157.png)
+![Cura Banner](images/Frame_2106667157.png)
 
 **The phone cleaner that can't phone home** :3
 
