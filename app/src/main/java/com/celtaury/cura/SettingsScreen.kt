@@ -6,6 +6,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +30,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -54,6 +56,7 @@ import com.celtaury.cura.core.ThemePrefs
 import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.isPartialMediaAccess
 import com.celtaury.cura.core.mediaPermissions
+import androidx.core.os.LocaleListCompat
 import com.celtaury.cura.ui.theme.InterBlack
 import androidx.compose.ui.res.stringResource
 
@@ -118,9 +121,9 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             Spacer(Modifier.height(6.dp))
 
             // ── Appearance ──
-            SectionCard(title = "Appearance") {
+            SectionCard(title = stringResource(R.string.set_look_title)) {
                 Text(
-                    "Theme",
+                    stringResource(R.string.set_theme_label),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = cs.onSurfaceVariant
@@ -128,9 +131,9 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 Spacer(Modifier.height(6.dp))
                 Row {
                     listOf(
-                        ThemePrefs.SYSTEM to "System",
-                        ThemePrefs.LIGHT to "Light",
-                        ThemePrefs.DARK to "Dark"
+                        ThemePrefs.SYSTEM to stringResource(R.string.set_theme_system),
+                        ThemePrefs.LIGHT to stringResource(R.string.set_theme_light),
+                        ThemePrefs.DARK to stringResource(R.string.set_theme_dark)
                     ).forEach { (mode, label) ->
                         FilterChip(
                             selected = themeMode == mode,
@@ -142,8 +145,53 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 }
             }
 
+            // ── Language / Bahasa (D1.5 — per-app locales, persists on its
+            //    own; on Android 13+ it also appears in system Settings) ──
+            val currentTag = AppCompatDelegate.getApplicationLocales()
+                .get(0)?.language ?: ""
+            SectionCard(title = stringResource(R.string.set_lang_title)) {
+                Text(stringResource(R.string.set_lang_sub), fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                LangRow(
+                    label = stringResource(R.string.set_lang_system),
+                    selected = currentTag.isEmpty()
+                ) {
+                    if (currentTag.isNotEmpty()) {
+                        AppCompatDelegate.setApplicationLocales(
+                            LocaleListCompat.getEmptyLocaleList()
+                        )
+                    }
+                }
+                LangRow(
+                    label = stringResource(R.string.lang_english),
+                    selected = currentTag == "en"
+                ) {
+                    if (currentTag != "en") {
+                        AppCompatDelegate.setApplicationLocales(
+                            LocaleListCompat.forLanguageTags("en")
+                        )
+                    }
+                }
+                LangRow(
+                    label = stringResource(R.string.lang_indo),
+                    selected = currentTag == "in"
+                ) {
+                    if (currentTag != "in") {
+                        AppCompatDelegate.setApplicationLocales(
+                            LocaleListCompat.forLanguageTags("in")
+                        )
+                    }
+                }
+            }
+
+            // Replay the intro/tutorial on demand (D1.5) — back returns here.
+            MenuRow(
+                title = stringResource(R.string.set_replay_title),
+                subtitle = stringResource(R.string.set_replay_sub)
+            ) { onNavigate("onboarding") }
+
             // ── Permissions ──
-            SectionCard(title = "Permissions") {
+            SectionCard(title = stringResource(R.string.set_perm_title)) {
                 Text(
                     when {
                         mediaOk && !partialMedia ->
@@ -329,5 +377,26 @@ private fun MenuRow(title: String, subtitle: String, onClick: () -> Unit) {
                 tint = cs.onSurfaceVariant
             )
         }
+    }
+}
+
+/** D1.5: one language choice row — radio + label, whole row tappable. */
+@Composable
+private fun LangRow(label: String, selected: Boolean, onPick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onPick)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = onPick)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            fontSize = 15.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+        )
     }
 }

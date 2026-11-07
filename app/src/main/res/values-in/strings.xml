@@ -173,6 +173,8 @@
     <string name="ks_title">Keep-safe</string>
     <string name="ks_unprotected">Tak dilindungi 🛡️</string>
     <string name="ks_unprotected_name">\"%1$s\" tak lagi dilindungi</string>
+    <string name="lang_english">English</string>
+    <string name="lang_indo">Bahasa Indonesia</string>
     <string name="lf_sub">30 MB ke atas · geser untuk menilai</string>
     <string name="lf_title">File Besar</string>
     <string name="more_cura">CURA</string>
@@ -205,6 +207,8 @@
     <string name="onb_gesture">Satu gerakan. Itu saja.</string>
     <string name="onb_go">Ayo mulai 🌿</string>
     <string name="onb_grant">Beri izin</string>
+    <string name="onb_lang_sub">Bisa diubah kapan saja di Pengaturan</string>
+    <string name="onb_lang_title">Pilih bahasamu</string>
     <string name="onb_next">Lanjut</string>
     <string name="onb_not_now">Nanti dulu</string>
     <string name="onb_perm_body">Langkah terakhir: izinkan Cura melihat foto &amp; videomu. Semuanya tetap di ponselmu.</string>
@@ -267,6 +271,10 @@
     <string name="set_impact_sub">Ruang terhemat, sesi, penyimpanan</string>
     <string name="set_instant_body">Lewati lembar “yakin hapus?” dari Cura — sekali ketuk langsung hilang. Android mungkin tetap bertanya lewat dialognya sendiri, dan semuanya tetap bisa dipulihkan lewat Trash &amp; pemulihan selama ~30 hari.</string>
     <string name="set_instant_title">Hapus instan</string>
+    <string name="set_lang_sub">Berlaku untuk seluruh aplikasi</string>
+    <string name="set_lang_system">Ikuti ponsel (default sistem)</string>
+    <string name="set_lang_title">Bahasa / Language</string>
+    <string name="set_look_title">Tampilan</string>
     <string name="set_link_failed">Gagal membuka tautan</string>
     <string name="set_media_off">⚠️ Akses foto mati — Cura belum bisa melihat apa pun.</string>
     <string name="set_media_ok">✅ Akses foto diberikan — Cura bisa melihat mediamu.</string>
@@ -276,10 +284,17 @@
     <string name="set_open_files_instead">Atau buka aplikasi Files saja</string>
     <string name="set_show_trash">Lihat isi trash</string>
     <string name="set_subtitle">Dial kecil, kenyamanan besar</string>
+    <string name="set_perm_title">Izin</string>
+    <string name="set_replay_sub">Lihat intro dan tutorialnya lagi</string>
+    <string name="set_replay_title">Putar ulang intro</string>
     <string name="set_support">Dukung Cura 💚</string>
     <string name="set_support_body">Cura gratis, tanpa iklan, dan tidak pernah menjual datamu. Kalau Cura menghemat ruang — dan sedikit stres — donasi kecil menjaganya tetap begitu.</string>
     <string name="set_support_btn">Dukung proyek</string>
     <string name="set_title">Pengaturan</string>
+    <string name="set_theme_dark">Gelap</string>
+    <string name="set_theme_light">Terang</string>
+    <string name="set_theme_system">Sistem</string>
+    <string name="set_theme_label">Tema</string>
     <string name="set_trash_teach">Cura tidak pernah menghapus begitu saja. File yang dibersihkan istirahat di Trash ponselmu sekitar 30 hari:\n\n1. Buka aplikasi Files\n2. Ketuk Library atau Menu\n3. Ketuk Trash — pulihkan yang kamu rindukan</string>
     <string name="soc_delete_selected">Hapus terpilih (%1$d)</string>
     <string name="soc_desc">WhatsApp diam-diam menumpuk meme, video, dan voice note. Lihat semua yang ditampungnya, geser kiri untuk yang tidak perlu — geser kanan untuk mengamankan sisanya. File terlindungi tidak akan pernah terhapus.</string>

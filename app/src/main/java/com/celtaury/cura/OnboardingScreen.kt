@@ -3,7 +3,9 @@ package com.celtaury.cura
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,20 +37,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.os.LocaleListCompat
 import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.mediaPermissions
 import com.celtaury.cura.ui.theme.InterBlack
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 
-/** One-shot flag: onboarding shows only on a truly first launch. */
+/** One-shot flag: onboarding shows only on a truly first launch.
+ *
+ * D1.5: lives in its OWN prefs file (cura_onboarding), which backup rules
+ * EXCLUDE — with the old shared cura_settings file, android:allowBackup
+ * restored the flag on every reinstall and nobody ever saw onboarding.
+ */
 object OnboardingPrefs {
-    private const val PREFS = "cura_settings"
+    private const val PREFS = "cura_onboarding"
     private const val KEY = "onboarded"
 
     fun done(context: Context): Boolean =
@@ -61,15 +70,17 @@ object OnboardingPrefs {
 }
 
 /**
- * Onboarding, UX v2: intro → swipe tutorial → permission.
- * "Not now" skips gracefully — the dashboard keeps a persistent grant banner.
+ * Onboarding, UX v2 (D1.5): language → intro → swipe tutorial → permission.
+ * The language page comes FIRST — an elderly user who doesn't read English
+ * must understand everything that follows. "Not now" skips gracefully —
+ * the dashboard keeps a persistent grant banner.
  */
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { 4 })
 
     var granted by remember { mutableStateOf(hasMediaAccess(context)) }
 
@@ -107,12 +118,13 @@ fun OnboardingScreen(onDone: () -> Unit) {
             modifier = Modifier.weight(1f)
         ) { page ->
             when (page) {
-                0 -> OnboardingPage(
+                0 -> LanguagePage()
+                1 -> OnboardingPage(
                     emoji = "🌿",
                     title = stringResource(R.string.onb_1_title),
                     body = stringResource(R.string.onb_1_body)
                 )
-                1 -> {
+                2 -> {
                     Column(
                         modifier = Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -156,7 +168,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            repeat(3) { i ->
+            repeat(4) { i ->
                 val active = pagerState.currentPage == i
                 Box(
                     modifier = Modifier
@@ -170,7 +182,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
         Spacer(Modifier.height(18.dp))
 
-        if (pagerState.currentPage == 2) {
+        if (pagerState.currentPage == 3) {
             if (!granted) {
                 Text(
                     stringResource(R.string.onb_perm_body),
@@ -205,7 +217,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 onClick = {
                     scope.launch {
                         pagerState.animateScrollToPage(
-                            (pagerState.currentPage + 1).coerceAtMost(2)
+                            (pagerState.currentPage + 1).coerceAtMost(3)
                         )
                     }
                 },
@@ -266,6 +278,95 @@ private fun SwipeLegendCard(
                 Text(title, fontWeight = FontWeight.Bold, color = onContainer, fontSize = 17.sp)
                 Spacer(Modifier.height(3.dp))
                 Text(body, fontSize = 13.sp, color = onContainer)
+            }
+        }
+    }
+}
+
+/**
+ * D1.5 page 0: pick the app language before anything else. Selecting applies
+ * the per-app locale immediately — the activity recreates, the pager re-opens
+ * on this page in the chosen language with the ✓ on the chosen card, and one
+ * tap on Next continues. "in" is Android's legacy locale code for Indonesian
+ * (the res folder is values-in for the same reason).
+ */
+@Composable
+private fun LanguagePage() {
+    val cs = MaterialTheme.colorScheme
+    val configuration = LocalConfiguration.current
+
+    // effective language = explicit override if set, else what the system gives
+    val effective = AppCompatDelegate.getApplicationLocales().get(0)?.language
+        ?: configuration.locales.get(0)?.language ?: "en"
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            stringResource(R.string.onb_lang_title),
+            style = MaterialTheme.typography.headlineMedium,
+            fontFamily = InterBlack,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.onb_lang_sub),
+            style = MaterialTheme.typography.bodyMedium,
+            color = cs.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(28.dp))
+        LanguageCard(
+            label = stringResource(R.string.lang_english),
+            selected = effective == "en",
+            container = if (effective == "en") cs.primaryContainer else cs.surfaceVariant,
+            onContainer = if (effective == "en") cs.onPrimaryContainer else cs.onSurfaceVariant
+        ) {
+            if (effective != "en") {
+                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("en"))
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        LanguageCard(
+            label = stringResource(R.string.lang_indo),
+            selected = effective == "in",
+            container = if (effective == "in") cs.primaryContainer else cs.surfaceVariant,
+            onContainer = if (effective == "in") cs.onPrimaryContainer else cs.onSurfaceVariant
+        ) {
+            if (effective != "in") {
+                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("in"))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguageCard(
+    label: String,
+    selected: Boolean,
+    container: androidx.compose.ui.graphics.Color,
+    onContainer: androidx.compose.ui.graphics.Color,
+    onPick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .clickable(onClick = onPick),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                fontWeight = FontWeight.Bold,
+                fontSize = 19.sp,
+                color = onContainer,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) {
+                Text("✓", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = onContainer)
             }
         }
     }

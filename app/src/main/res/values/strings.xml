@@ -173,6 +173,8 @@
     <string name="ks_title">Keep-safe</string>
     <string name="ks_unprotected">Unprotected 🛡️</string>
     <string name="ks_unprotected_name">Unprotected \"%1$s\"</string>
+    <string name="lang_english">English</string>
+    <string name="lang_indo">Bahasa Indonesia</string>
     <string name="lf_sub">30 MB and up · swipe to judge</string>
     <string name="lf_title">Large Files</string>
     <string name="more_cura">CURA</string>
@@ -205,6 +207,8 @@
     <string name="onb_gesture">One gesture. That\'s it.</string>
     <string name="onb_go">Let\'s go 🌿</string>
     <string name="onb_grant">Grant access</string>
+    <string name="onb_lang_sub">You can change this anytime in Settings</string>
+    <string name="onb_lang_title">Choose your language</string>
     <string name="onb_next">Next</string>
     <string name="onb_not_now">Not now</string>
     <string name="onb_perm_body">Last step: let Cura look at your photos &amp; videos. It all stays on your phone.</string>
@@ -267,6 +271,10 @@
     <string name="set_impact_sub">Saved space, sessions, storage</string>
     <string name="set_instant_body">Skip Cura\'s “are you sure?” sheet — one tap and it\'s out of sight. Android may still ask on its own dialog, and everything stays recoverable in Trash &amp; recovery for ~30 days.</string>
     <string name="set_instant_title">Instant delete</string>
+    <string name="set_lang_sub">Applies to the whole app</string>
+    <string name="set_lang_system">Follow the phone (system default)</string>
+    <string name="set_lang_title">Language / Bahasa</string>
+    <string name="set_look_title">Appearance</string>
     <string name="set_link_failed">Couldn\'t open the link</string>
     <string name="set_media_off">⚠️ Photo access is off — Cura can\'t see anything yet.</string>
     <string name="set_media_ok">✅ Photo access granted — Cura can see your media.</string>
@@ -276,10 +284,17 @@
     <string name="set_open_files_instead">Or open the Files app instead</string>
     <string name="set_show_trash">Show what\'s in the trash</string>
     <string name="set_subtitle">Small dials, big comfort</string>
+    <string name="set_perm_title">Permissions</string>
+    <string name="set_replay_sub">See the intro and tutorial again</string>
+    <string name="set_replay_title">Replay intro</string>
     <string name="set_support">Support Cura 💚</string>
     <string name="set_support_body">Cura is free, shows no ads, and never sells your data. If it saved you space — and a little stress — a small donation keeps it that way.</string>
     <string name="set_support_btn">Support the project</string>
     <string name="set_title">Settings</string>
+    <string name="set_theme_dark">Dark</string>
+    <string name="set_theme_light">Light</string>
+    <string name="set_theme_system">System</string>
+    <string name="set_theme_label">Theme</string>
     <string name="set_trash_teach">Cura never destroys instantly. Cleaned files rest in your phone\'s Trash for about 30 days:\n\n1. Open your Files app\n2. Tap Library or Menu\n3. Tap Trash — restore what you miss</string>
     <string name="soc_delete_selected">Delete selected (%1$d)</string>
     <string name="soc_desc">WhatsApp quietly collects memes, videos and voice notes. See everything it\'s holding, swipe left on what you don\'t need — and swipe right to keep the rest safe. Protected files can never be deleted.</string>

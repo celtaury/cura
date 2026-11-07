@@ -2,6 +2,7 @@
 <resources>
 
     <!-- Dark variant: window background + system bars follow the dark palette,
-         so there is no white flash or light strip behind edge-to-edge content. -->
-    <style name="Theme.Cura" parent="android:Theme.Material.NoActionBar" />
+         so there is no white flash or light strip behind edge-to-edge content.
+         D1.5: AppCompat parent required by AppCompatActivity (language). -->
+    <style name="Theme.Cura" parent="Theme.AppCompat.NoActionBar" />
 </resources>
