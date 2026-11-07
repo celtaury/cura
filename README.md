@@ -4,6 +4,8 @@
 
 **The phone cleaner that can't phone home** :3
 
+![Cura Banner](images/Banner.png)
+
 No ads · No tracking · No INTERNET permission
 
 [![Latest release](https://img.shields.io/github/v/release/celtaury/cura)](https://github.com/celtaury/cura/releases/latest)
