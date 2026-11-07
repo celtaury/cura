@@ -102,6 +102,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 
 /** One Keep-safe action that can still be undone (burst-style, list edition).
  *  Named per-file (Quick…) — K2 flags same-name top-level classes as redeclaration
@@ -117,7 +119,8 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     val snackbarHostState = remember { SnackbarHostState() }
 
     var phase by remember { mutableStateOf("scanning") }
-    var scanStatus by remember { mutableStateOf("Warming up…") }
+    val warming = stringResource(R.string.qq_warming)
+    var scanStatus by remember { mutableStateOf(warming) }
     var categories by remember { mutableStateOf<List<JunkCategory>>(emptyList()) }
     var selectedCategoryKey by remember { mutableStateOf("all") }
     var queuedUris by remember { mutableStateOf(DeleteQueuePrefs.getQueue(context, "quick_clean")) }
@@ -127,28 +130,28 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
         withContext(Dispatchers.IO) {
             val found = mutableListOf<JunkCategory>()
 
-            scanStatus = "Hunting empty files…"
+            scanStatus = context.getString(R.string.qq_scan_empty)
             val empties = Scanner.emptyFiles(context)
             if (empties.isNotEmpty()) {
-                found += JunkCategory("empty", "Empty files", "Zero bytes, pure clutter", empties)
+                found += JunkCategory("empty", context.getString(R.string.qq_cat_empty), context.getString(R.string.qq_cat_empty_sub), empties)
             }
 
-            scanStatus = "Spotting duplicates…"
+            scanStatus = context.getString(R.string.qq_scan_dupes)
             val dupes = Scanner.duplicateImages(context)
             if (dupes.isNotEmpty()) {
-                found += JunkCategory("dupes", "Duplicate photos", "Same picture, many copies", dupes)
+                found += JunkCategory("dupes", context.getString(R.string.qq_cat_dupes), context.getString(R.string.qq_cat_dupes_sub), dupes)
             }
 
-            scanStatus = "Digging up installers…"
+            scanStatus = context.getString(R.string.qq_scan_apks)
             val apks = Scanner.apkFiles(context)
             if (apks.isNotEmpty()) {
-                found += JunkCategory("apks", "APK installers", "Forgotten installer files", apks)
+                found += JunkCategory("apks", context.getString(R.string.qq_cat_apks), context.getString(R.string.qq_cat_apks_sub), apks)
             }
 
-            scanStatus = "Leafing through screenshots…"
+            scanStatus = context.getString(R.string.qq_scan_shots)
             val shots = Scanner.oldScreenshots(context, minAgeDays = 30)
             if (shots.isNotEmpty()) {
-                found += JunkCategory("shots", "Old screenshots", "Untouched for 30+ days", shots)
+                found += JunkCategory("shots", context.getString(R.string.qq_cat_shots), context.getString(R.string.qq_cat_shots_sub), shots)
             }
 
             val seen = HashSet<String>()
@@ -195,9 +198,9 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             val group = pendingKeeps
             val result = snackbarHostState.showSnackbar(
                 message = if (group.size == 1)
-                    "Saved \"${item.displayName}\" to Keep-safe 🛡️"
+                    context.getString(R.string.common_saved_keepsafe, item.displayName)
                 else
-                    "Kept ${group.size} items safe 🛡️",
+                    context.resources.getQuantityString(R.plurals.common_kept_safe_n, group.size, group.size),
                 actionLabel = "Undo",
                 duration = SnackbarDuration.Long
             )
@@ -211,7 +214,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 keepBaseCategories = null
                 Toast.makeText(
                     context,
-                    if (group.size == 1) "Protection removed" else "${group.size} protections removed",
+                    context.resources.getQuantityString(R.plurals.common_prot_removed_n, group.size, group.size),
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
@@ -239,7 +242,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 
             queuedUris = emptySet()
             DeleteQueuePrefs.clear(context, "quick_clean")
-            Toast.makeText(context, "Cleaned successfully 🌿", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.common_cleaned_ok), Toast.LENGTH_SHORT).show()
         }
     )
 
@@ -279,7 +282,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                             fontFamily = InterBlack
                         )
                         Text(
-                            "Tap thumbnail to preview · swipe left to queue delete",
+                            stringResource(R.string.qq_hint),
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant
                         )
@@ -287,7 +290,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -319,7 +322,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "🛡️ Keep-safe files are never touched",
+                        stringResource(R.string.common_ks_never),
                         fontSize = 12.sp,
                         color = cs.onSurfaceVariant
                     )
@@ -337,13 +340,13 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                             Text("🌿", fontSize = 54.sp)
                             Spacer(Modifier.height(14.dp))
                             Text(
-                                "You're already clean!",
+                                stringResource(R.string.qq_already_clean),
                                 style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Nothing junky found this time.",
+                                stringResource(R.string.qq_none_found),
                                 color = cs.onSurfaceVariant
                             )
                             Spacer(Modifier.height(24.dp))
@@ -351,7 +354,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                 onClick = onBack,
                                 shape = CircleShape
                             ) {
-                                Text("Back home")
+                                Text(stringResource(R.string.common_back_home))
                             }
                         }
                     } else {
@@ -376,7 +379,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                         FilterChip(
                                             selected = selectedCategoryKey == "all",
                                             onClick = { selectedCategoryKey = "all" },
-                                            label = { Text("All ($totalItems)") },
+                                            label = { Text(stringResource(R.string.common_all_n, totalItems)) },
                                             shape = CircleShape,
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = cs.primaryContainer,
@@ -388,7 +391,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                         FilterChip(
                                             selected = selectedCategoryKey == cat.key,
                                             onClick = { selectedCategoryKey = cat.key },
-                                            label = { Text("${cat.title} (${cat.items.size})") },
+                                            label = { Text(stringResource(R.string.common_name_n, cat.title, cat.items.size)) },
                                             shape = CircleShape,
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = cs.primaryContainer,
@@ -421,13 +424,13 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                     ) {
                                         Column(Modifier.weight(1f)) {
                                             Text(
-                                                "Found $totalItems suggestions",
+                                                context.resources.getQuantityString(R.plurals.qq_found_n, totalItems, totalItems),
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 15.sp,
                                                 color = cs.onSurface
                                             )
                                             Text(
-                                                "${humanBytes(totalBytes)} recoverable · ${queuedUris.size} queued (saved)",
+                                                stringResource(R.string.qq_recoverable, humanBytes(totalBytes), queuedUris.size),
                                                 fontSize = 12.sp,
                                                 color = if (queuedUris.isNotEmpty()) cs.error else cs.onSurfaceVariant
                                             )
@@ -444,7 +447,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                                         ) {
                                             Text(
-                                                if (queuedUris.size == displayedItems.size) "Clear Queue" else "Queue All",
+                                                if (queuedUris.size == displayedItems.size) stringResource(R.string.common_clear_queue) else stringResource(R.string.common_queue_all),
                                                 fontSize = 12.sp
                                             )
                                         }
@@ -561,7 +564,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                         )
                                                         Spacer(Modifier.height(3.dp))
                                                         Text(
-                                                            "${humanBytes(item.sizeBytes)} · added ${relativeDays(item.dateAddedSec)}",
+                                                            stringResource(R.string.common_item_meta, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec)),
                                                             fontSize = 12.sp,
                                                             color = cs.onSurfaceVariant
                                                         )
@@ -629,9 +632,9 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
                                             if (queuedUris.isNotEmpty())
-                                                "${queuedUris.size} queued"
+                                                stringResource(R.string.common_n_queued, queuedUris.size)
                                             else
-                                                "${displayedItems.size} items",
+                                                pluralStringResource(R.plurals.common_items_n, displayedItems.size, displayedItems.size),
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 14.sp,
                                             color = if (queuedUris.isNotEmpty()) cs.error else cs.onSurface
@@ -663,7 +666,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                             )
                                             Spacer(Modifier.width(6.dp))
                                             Text(
-                                                "Delete Queued (${queuedUris.size})",
+                                                stringResource(R.string.qq_delete_queued, queuedUris.size),
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
@@ -683,7 +686,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Spacer(Modifier.width(6.dp))
-                                            Text("Queue All", fontWeight = FontWeight.Bold)
+                                            Text(stringResource(R.string.common_queue_all), fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -759,12 +762,12 @@ private fun SwipeActionItem(
                 ) {
                     Icon(
                         Icons.Default.Security,
-                        contentDescription = "Keep Safe",
+                        contentDescription = stringResource(R.string.common_keep_cd),
                         tint = Color.White.copy(alpha = alpha),
                         modifier = Modifier.size(24.dp)
                     )
                     Text(
-                        "Keep Safe",
+                        stringResource(R.string.common_keep_btn),
                         color = Color.White.copy(alpha = alpha),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -787,14 +790,14 @@ private fun SwipeActionItem(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        if (isQueued) "Remove Queue" else "Queue Delete",
+                        if (isQueued) stringResource(R.string.common_remove_queue) else stringResource(R.string.common_queue_delete),
                         color = Color.White.copy(alpha = alpha),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Icon(
                         if (isQueued) Icons.Default.RemoveCircleOutline else Icons.Default.Delete,
-                        contentDescription = "Queue Delete",
+                        contentDescription = stringResource(R.string.common_queue_delete),
                         tint = Color.White.copy(alpha = alpha),
                         modifier = Modifier.size(24.dp)
                     )

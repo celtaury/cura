@@ -45,6 +45,9 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import com.celtaury.cura.R
 
 /**
  * In-app bulk delete confirmation (#6): shows exactly what is about to be
@@ -148,7 +151,7 @@ private fun ConfirmDeleteSheet(
 ) {
     val cs = MaterialTheme.colorScheme
     val bytes = items.sumOf { it.sizeBytes }
-    val noun = if (items.size == 1) "item" else "items"
+    
 
     // Expressive entrance: the sheet card slides fully into view in one go
     // (skipPartiallyExpanded), then the UI appears with opacity — the header
@@ -185,12 +188,12 @@ private fun ConfirmDeleteSheet(
                     }
             ) {
                 Text(
-                    "Delete ${items.size} $noun?",
+                    pluralStringResource(R.plurals.cd_title, items.size, items.size),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "About ${humanBytes(bytes)} · they land in Trash first (recoverable ~30 days)",
+                    stringResource(R.string.cd_about, humanBytes(bytes)),
                     fontSize = 13.sp,
                     color = cs.onSurfaceVariant
                 )
@@ -241,12 +244,12 @@ private fun ConfirmDeleteSheet(
                     colors = ButtonDefaults.buttonColors(containerColor = cs.error)
                 ) {
                     Text(
-                        "Delete ${items.size} $noun · ${humanBytes(bytes)}",
+                        pluralStringResource(R.plurals.cd_button, items.size, items.size, humanBytes(bytes)),
                         fontWeight = FontWeight.Bold
                     )
                 }
                 TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                    Text("Keep them")
+                    Text(stringResource(R.string.cd_keep))
                 }
             }
             Spacer(Modifier.height(20.dp))

@@ -46,6 +46,8 @@ import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.ui.theme.InterBlack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,10 +72,10 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
         containerColor = cs.background,
         topBar = {
             TopAppBar(
-                title = { Text("More Tools", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.dash_open_more), fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -94,7 +96,7 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
                 colors = CardDefaults.cardColors(containerColor = cs.tertiaryContainer)
             ) {
                 Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                    Text("Your impact", style = MaterialTheme.typography.titleSmall,
+                    Text(stringResource(R.string.more_impact), style = MaterialTheme.typography.titleSmall,
                         color = cs.onTertiaryContainer)
                     Text(
                         humanBytes(savedBytes),
@@ -102,7 +104,7 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
                         color = cs.onTertiaryContainer
                     )
                     Text(
-                        "freed across $sessions clean session${if (sessions == 1) "" else "s"} 🌿",
+                        pluralStringResource(R.plurals.more_sessions_n, sessions, sessions),
                         style = MaterialTheme.typography.bodyMedium,
                         color = cs.onTertiaryContainer
                     )
@@ -118,15 +120,15 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
                 colors = CardDefaults.cardColors(containerColor = cs.surface),
             ) {
                 Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                    Text("Device storage", style = MaterialTheme.typography.titleSmall,
+                    Text(stringResource(R.string.more_storage), style = MaterialTheme.typography.titleSmall,
                         color = cs.onSurfaceVariant)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        storage?.let { "${humanBytes(it.usedBytes)} used of ${humanBytes(it.totalBytes)}" } ?: "…",
+                        storage?.let { stringResource(R.string.common_used_of, humanBytes(it.usedBytes), humanBytes(it.totalBytes)) } ?: "…",
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        storage?.let { "${humanBytes(it.freeBytes)} free · ${(it.percentageUsed * 100).toInt()}% full" } ?: "Calculating…",
+                        storage?.let { stringResource(R.string.more_free_pct, humanBytes(it.freeBytes), (it.percentageUsed * 100).toInt()) } ?: "Calculating…",
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant
                     )
@@ -136,16 +138,16 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
             Spacer(Modifier.height(14.dp))
 
             // Menu rows
-            MenuRow(title = "Manage Keep-safe 🛡️", subtitle = "See and unprotect saved files") {
+            MenuRow(title = stringResource(R.string.more_ks), subtitle = stringResource(R.string.more_ks_sub)) {
                 onNavigate("keepsafe")
             }
             MenuRow(
-                title = "Trash & recovery 🗑️",
-                subtitle = "Bring back files a clean deleted — before the ~30 days end"
+                title = stringResource(R.string.more_trash),
+                subtitle = stringResource(R.string.more_trash_sub)
             ) {
                 onNavigate("trash")
             }
-            MenuRow(title = "Reset saved-counter", subtitle = "Start the impact counter fresh") {
+            MenuRow(title = stringResource(R.string.more_reset), subtitle = stringResource(R.string.more_reset_sub)) {
                 showReset = true
             }
 
@@ -153,20 +155,20 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
 
             // ── Legacy tools (still work, just live in the attic now) ──
             Text(
-                "Legacy tools",
+                stringResource(R.string.more_legacy),
                 style = MaterialTheme.typography.titleSmall,
                 color = cs.onSurfaceVariant
             )
             Spacer(Modifier.height(6.dp))
             MenuRow(
-                title = "Large Files · legacy",
-                subtitle = "Older tool — files over 50 MB, biggest first"
+                title = stringResource(R.string.more_large),
+                subtitle = stringResource(R.string.more_large_sub)
             ) {
                 onNavigate("large_files")
             }
             MenuRow(
-                title = "Photo Organizer · legacy",
-                subtitle = "Older tool — group your gallery by month"
+                title = stringResource(R.string.more_org),
+                subtitle = stringResource(R.string.more_org_sub)
             ) {
                 onNavigate("organize")
             }
@@ -180,9 +182,9 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
                 colors = CardDefaults.cardColors(containerColor = cs.surfaceVariant)
             ) {
                 Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                    Text("CURA", fontFamily = InterBlack, fontSize = 18.sp)
+                    Text(stringResource(R.string.more_cura), fontFamily = InterBlack, fontSize = 18.sp)
                     Text(
-                        "Storage care, not storage stress. v${BuildConfig.VERSION_NAME} · flow build.",
+                        stringResource(R.string.more_footer, BuildConfig.VERSION_NAME),
                         style = MaterialTheme.typography.bodySmall,
                         color = cs.onSurfaceVariant
                     )
@@ -195,17 +197,17 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
     if (showReset) {
         AlertDialog(
             onDismissRequest = { showReset = false },
-            title = { Text("Reset the counter?") },
-            text = { Text("The \"Cura has saved you X\" number goes back to zero. Your files are untouched.") },
+            title = { Text(stringResource(R.string.more_reset_dlg)) },
+            text = { Text(stringResource(R.string.more_reset_body)) },
             confirmButton = {
                 TextButton(onClick = {
                     SavedStats.reset(context)
                     showReset = false
                     onBack()
-                }) { Text("Reset") }
+                }) { Text(stringResource(R.string.more_reset_btn)) }
             },
             dismissButton = {
-                TextButton(onClick = { showReset = false }) { Text("Cancel") }
+                TextButton(onClick = { showReset = false }) { Text(stringResource(R.string.common_cancel)) }
             }
         )
     }

@@ -76,6 +76,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import com.celtaury.cura.R
 
 /** DeckPrefs key so the browse queue survives leaving the screen. */
 private const val BROWSE_ROUTE = "browse_gallery"
@@ -88,9 +91,8 @@ private const val BROWSE_ROUTE = "browse_gallery"
 @Composable
 fun BrowseGalleryScreen(onBack: () -> Unit) {
     PermissionGate(
-        title = "Browse Gallery",
-        description = "Swipe through your gallery month by month. " +
-            "Nothing is touched without your say-so."
+        title = stringResource(R.string.dash_open_browse),
+        description = stringResource(R.string.browse_perm_desc)
     ) {
         BrowseContent(onBack = onBack)
     }
@@ -127,9 +129,9 @@ private fun BrowseContent(onBack: () -> Unit) {
             val group = pendingKeeps
             val result = snack.showSnackbar(
                 message = if (group.size == 1)
-                    "Saved \"${item.displayName}\" to Keep-safe 🛡️"
+                    context.getString(R.string.common_saved_keepsafe, item.displayName)
                 else
-                    "Kept ${group.size} items safe 🛡️",
+                    context.resources.getQuantityString(R.plurals.common_kept_safe_n, group.size, group.size),
                 actionLabel = "Undo",
                 duration = SnackbarDuration.Long
             )
@@ -139,7 +141,7 @@ private fun BrowseContent(onBack: () -> Unit) {
                 pendingKeeps = emptyList()
                 Toast.makeText(
                     context,
-                    if (group.size == 1) "Protection removed" else "${group.size} protections removed",
+                    context.resources.getQuantityString(R.plurals.common_prot_removed_n, group.size, group.size),
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
@@ -172,7 +174,7 @@ private fun BrowseContent(onBack: () -> Unit) {
         DeckPrefs.setQueue(context, BROWSE_ROUTE, emptyList())
         scope.launch {
             snack.showSnackbar(
-                "Purged $count item${if (count == 1) "" else "s"} · ${humanBytes(bytes)} freed 🎉"
+                context.resources.getQuantityString(R.plurals.common_purged_n, count, count, humanBytes(bytes))
             )
         }
     })
@@ -185,9 +187,9 @@ private fun BrowseContent(onBack: () -> Unit) {
                 TopAppBar(
                     title = {
                         Column {
-                            Text("Browse Gallery", fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.dash_open_browse), fontWeight = FontWeight.Bold)
                             Text(
-                                "Swipe a tile: left 🧹 queue · right 🛡️ keep safe",
+                                stringResource(R.string.browse_hint),
                                 fontSize = 12.sp,
                                 color = cs.onSurfaceVariant
                             )
@@ -195,7 +197,7 @@ private fun BrowseContent(onBack: () -> Unit) {
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -211,14 +213,14 @@ private fun BrowseContent(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "${queued.size} queued 🧹",
+                            stringResource(R.string.common_n_queued_broom, queued.size),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = cs.onErrorContainer
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "tap to purge",
+                            stringResource(R.string.common_tap_purge),
                             fontSize = 12.sp,
                             color = cs.onErrorContainer.copy(alpha = 0.7f)
                         )
@@ -235,7 +237,7 @@ private fun BrowseContent(onBack: () -> Unit) {
             ) {
                 CircularProgressIndicator(color = cs.primary, modifier = Modifier.size(56.dp))
                 Spacer(Modifier.height(14.dp))
-                Text("Opening your gallery…", color = cs.onSurfaceVariant)
+                Text(stringResource(R.string.browse_loading), color = cs.onSurfaceVariant)
             }
 
             months.all { it.second.isEmpty() } -> Column(
@@ -245,9 +247,9 @@ private fun BrowseContent(onBack: () -> Unit) {
             ) {
                 Text("🌿", fontSize = 52.sp)
                 Spacer(Modifier.height(12.dp))
-                Text("Nothing to browse", style = MaterialTheme.typography.headlineSmall)
+                Text(stringResource(R.string.browse_empty), style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "Your gallery is empty or fully keep-safe.",
+                    stringResource(R.string.browse_empty_body),
                     color = cs.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
@@ -273,8 +275,8 @@ private fun BrowseContent(onBack: () -> Unit) {
                                 fontSize = 16.sp
                             )
                             Text(
-                                "${visible.size} files · ${humanBytes(visible.sumOf { it.sizeBytes })}" +
-                                    if (queuedHere > 0) " · $queuedHere queued" else "",
+                                pluralStringResource(R.plurals.common_files_bytes, visible.size, visible.size, humanBytes(visible.sumOf { it.sizeBytes })) +
+                                    if (queuedHere > 0) " · " + stringResource(R.string.common_n_queued, queuedHere) else "",
                                 fontSize = 12.sp,
                                 color = cs.onSurfaceVariant
                             )
@@ -392,7 +394,7 @@ private fun BrowseTile(
         if (isVideo) {
             Icon(
                 Icons.Default.PlayCircle,
-                contentDescription = "Preview video",
+                contentDescription = stringResource(R.string.common_preview_video_cd),
                 tint = Color.White.copy(alpha = 0.85f),
                 modifier = Modifier.align(Alignment.Center).size(30.dp)
             )

@@ -103,6 +103,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+
+/** Social type chips — Scanner keys stay English, only the label translates. */
+private fun typeLabelRes(type: String): Int = when (type) {
+    "All" -> R.string.common_all
+    "Images" -> R.string.soc_type_images
+    "Videos" -> R.string.soc_type_videos
+    "Audio" -> R.string.soc_type_audio
+    "Docs" -> R.string.soc_type_docs
+    "Stickers" -> R.string.soc_type_stickers
+    else -> R.string.common_all
+}
 
 /**
  * Social Cleaner with Material 3 Expressive UI:
@@ -121,10 +134,8 @@ private data class SocialPendingKeep(val item: MediaItem, val wasQueued: Boolean
 @Composable
 fun SocialCleanerScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     PermissionGate(
-        title = "Social Cleaner",
-        description = "WhatsApp quietly collects memes, videos and voice notes. " +
-            "See everything it's holding, swipe left on what you don't need — " +
-            "and swipe right to keep the rest safe. Protected files can never be deleted."
+        title = stringResource(R.string.soc_title),
+        description = stringResource(R.string.soc_desc)
     ) {
         SocialCleanerContent(onBack)
     }
@@ -186,9 +197,9 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
             val group = pendingKeeps
             val result = snackbarHostState.showSnackbar(
                 message = if (group.size == 1)
-                    "Saved \"${item.displayName}\" to Keep-safe 🛡️"
+                    context.getString(R.string.common_saved_keepsafe, item.displayName)
                 else
-                    "Kept ${group.size} items safe 🛡️",
+                    context.resources.getQuantityString(R.plurals.common_kept_safe_n, group.size, group.size),
                 actionLabel = "Undo",
                 duration = SnackbarDuration.Long
             )
@@ -202,7 +213,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                 keepBaseItems = null
                 Toast.makeText(
                     context,
-                    if (group.size == 1) "Protection removed" else "${group.size} protections removed",
+                    context.resources.getQuantityString(R.plurals.common_prot_removed_n, group.size, group.size),
                     Toast.LENGTH_SHORT
                 ).show()
             } else {
@@ -226,7 +237,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
             items = items.filter { it.uri.toString() !in queuedUris }
             queuedUris = emptySet()
             DeleteQueuePrefs.clear(context, "social")
-            Toast.makeText(context, "Cleaned successfully 🌿", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.common_cleaned_ok), Toast.LENGTH_SHORT).show()
         }
     )
 
@@ -277,12 +288,12 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                 title = {
                     Column {
                         Text(
-                            "Social Cleaner",
+                            stringResource(R.string.soc_title),
                             fontWeight = FontWeight.Bold,
                             fontFamily = InterBlack
                         )
                         Text(
-                            "Tap thumbnail to preview · swipe left to queue delete",
+                            stringResource(R.string.soc_hint),
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant
                         )
@@ -290,7 +301,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -313,13 +324,13 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(20.dp))
                     Text(
-                        "Looking through WhatsApp…",
+                        stringResource(R.string.soc_loading),
                         style = MaterialTheme.typography.titleMedium,
                         color = cs.onSurfaceVariant
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "🛡️ Keep-safe files are never touched",
+                        stringResource(R.string.common_ks_never),
                         fontSize = 12.sp,
                         color = cs.onSurfaceVariant
                     )
@@ -335,13 +346,13 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                     Text("💬✨", fontSize = 54.sp)
                     Spacer(Modifier.height(14.dp))
                     Text(
-                        "Your chats are tidy!",
+                        stringResource(R.string.soc_tidy),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Nothing junky found in WhatsApp.",
+                        stringResource(R.string.soc_none),
                         color = cs.onSurfaceVariant
                     )
                     Spacer(Modifier.height(24.dp))
@@ -349,7 +360,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                         onClick = onBack,
                         shape = CircleShape
                     ) {
-                        Text("Back home")
+                        Text(stringResource(R.string.common_back_home))
                     }
                 }
             } else {
@@ -375,7 +386,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                 FilterChip(
                                     selected = selectedType == type,
                                     onClick = { selectedType = type },
-                                    label = { Text("$type ($count)") },
+                                    label = { Text("${stringResource(typeLabelRes(type))} ($count)") },
                                     shape = CircleShape,
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = cs.primaryContainer,
@@ -408,13 +419,13 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        "WhatsApp is holding ${items.size} files",
+                                        pluralStringResource(R.plurals.soc_holding_n, items.size, items.size),
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 15.sp,
                                         color = cs.onSurface
                                     )
                                     Text(
-                                        "${humanBytes(totalBytes)} total · ${queuedUris.size} selected for delete",
+                                        stringResource(R.string.soc_total_sel, humanBytes(totalBytes), queuedUris.size),
                                         fontSize = 12.sp,
                                         color = if (queuedUris.isNotEmpty()) cs.error else cs.onSurfaceVariant
                                     )
@@ -431,7 +442,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                                 ) {
                                     Text(
-                                        if (queuedUris.size == displayedItems.size) "Clear Queue" else "Queue All",
+                                        if (queuedUris.size == displayedItems.size) stringResource(R.string.common_clear_queue) else stringResource(R.string.common_queue_all),
                                         fontSize = 12.sp
                                     )
                                 }
@@ -564,7 +575,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                                 )
                                                 Spacer(Modifier.height(3.dp))
                                                 Text(
-                                                    "${humanBytes(item.sizeBytes)} · added ${relativeDays(item.dateAddedSec)} · $type",
+                                                    stringResource(R.string.soc_item_meta, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec), stringResource(typeLabelRes(type))),
                                                     fontSize = 12.sp,
                                                     color = cs.onSurfaceVariant
                                                 )
@@ -632,9 +643,9 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     if (queuedUris.isNotEmpty())
-                                        "${queuedUris.size} selected"
+                                        stringResource(R.string.common_n_queued, queuedUris.size)
                                     else
-                                        "${displayedItems.size} items",
+                                        pluralStringResource(R.plurals.common_items_n, displayedItems.size, displayedItems.size),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
                                     color = if (queuedUris.isNotEmpty()) cs.error else cs.onSurface
@@ -666,7 +677,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        "Delete selected (${queuedUris.size})",
+                                        stringResource(R.string.soc_delete_selected, queuedUris.size),
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -686,7 +697,7 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Select all", fontWeight = FontWeight.Bold)
+                                    Text(stringResource(R.string.common_select_all), fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -760,12 +771,12 @@ private fun SwipeActionItem(
                 ) {
                     Icon(
                         Icons.Default.Security,
-                        contentDescription = "Keep Safe",
+                        contentDescription = stringResource(R.string.common_keep_cd),
                         tint = Color.White.copy(alpha = alpha),
                         modifier = Modifier.size(24.dp)
                     )
                     Text(
-                        "Keep Safe",
+                        stringResource(R.string.common_keep_btn),
                         color = Color.White.copy(alpha = alpha),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -788,14 +799,14 @@ private fun SwipeActionItem(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        if (isQueued) "Remove Queue" else "Queue Delete",
+                        if (isQueued) stringResource(R.string.common_remove_queue) else stringResource(R.string.common_queue_delete),
                         color = Color.White.copy(alpha = alpha),
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Icon(
                         if (isQueued) Icons.Default.RemoveCircleOutline else Icons.Default.Delete,
-                        contentDescription = "Queue Delete",
+                        contentDescription = stringResource(R.string.common_queue_delete),
                         tint = Color.White.copy(alpha = alpha),
                         modifier = Modifier.size(24.dp)
                     )

@@ -79,18 +79,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 
 private data class CompressPreset(
     val key: String,
-    val label: String,
+    val labelRes: Int,
     val quality: Int,
     val maxEdge: Int
 )
 
 private val PRESETS = listOf(
-    CompressPreset("high", "High · 90%", 90, 1920),
-    CompressPreset("balanced", "Balanced · 75%", 75, 1600),
-    CompressPreset("small", "Small · 50%", 50, 1280)
+    CompressPreset("high", R.string.comp_preset_high, 90, 1920),
+    CompressPreset("balanced", R.string.comp_preset_balanced, 75, 1600),
+    CompressPreset("small", R.string.comp_preset_small, 50, 1280)
 )
 
 /**
@@ -101,8 +103,8 @@ private val PRESETS = listOf(
 @Composable
 fun CompressScreen(onBack: () -> Unit) {
     PermissionGate(
-        title = "Photo Compress",
-        description = "Shrink oversized photos to reclaim gigabytes. A compressed copy is saved, then the heavy original steps aside — recoverable from Trash for ~30 days."
+        title = stringResource(R.string.dash_open_compress),
+        description = stringResource(R.string.comp_desc)
     ) {
         CompressContent(onBack)
     }
@@ -159,6 +161,13 @@ private fun CompressContent(onBack: () -> Unit) {
 
     val selectedItems = photos.filter { it.uri.toString() in selected }
 
+    // D1 hotfix: these three strings are shown inside non-composable
+    // callbacks (Toast in onClick / scope.launch / onCancelled) where
+    // stringResource() is not allowed — resolve them here, at composition.
+    val keptNote = stringResource(R.string.comp_kept_note)
+    val needsQ = stringResource(R.string.comp_needs_q)
+    val alreadyTiny = stringResource(R.string.comp_already_tiny)
+
     val delete = rememberConfirmableDelete(
         onCleaned = {
             val saved = pendingReplace?.second ?: 0L
@@ -169,7 +178,7 @@ private fun CompressContent(onBack: () -> Unit) {
         onCancelled = {
             Toast.makeText(
                 context,
-                "Originals kept — compressed copies are in Pictures/Cura Compressed",
+                keptNote,
                 Toast.LENGTH_LONG
             ).show()
             pendingReplace = null
@@ -182,14 +191,14 @@ private fun CompressContent(onBack: () -> Unit) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Photo Compress", fontWeight = FontWeight.Bold)
-                        Text("Presets, preview, then originals step aside",
+                        Text(stringResource(R.string.dash_open_compress), fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.comp_sub),
                             fontSize = 12.sp, color = cs.onSurfaceVariant)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -210,11 +219,11 @@ private fun CompressContent(onBack: () -> Unit) {
                         Column {
                             val totalBytes = selectedItems.sumOf { it.sizeBytes }
                             Text(
-                                "${selectedItems.size} photos · ${humanBytes(totalBytes)}",
+                                pluralStringResource(R.plurals.comp_selected_n, selectedItems.size, selectedItems.size, humanBytes(totalBytes)),
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                "with ${preset.label} → originals go to Trash",
+                                stringResource(R.string.comp_dest, stringResource(preset.labelRes)),
                                 fontSize = 12.sp, color = onOrange
                             )
                         }
@@ -223,7 +232,7 @@ private fun CompressContent(onBack: () -> Unit) {
                                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                                     Toast.makeText(
                                         context,
-                                        "Saving compressed photos needs Android 10+",
+                                        needsQ,
                                         Toast.LENGTH_LONG
                                     ).show()
                                     return@Button
@@ -249,7 +258,7 @@ private fun CompressContent(onBack: () -> Unit) {
                                     if (savedPairs.isEmpty()) {
                                         Toast.makeText(
                                             context,
-                                            "Those photos are already tiny — nothing to save 🪶",
+                                            alreadyTiny,
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     } else {
@@ -261,7 +270,7 @@ private fun CompressContent(onBack: () -> Unit) {
                             },
                             enabled = selectedItems.isNotEmpty(),
                             colors = ButtonDefaults.buttonColors(containerColor = AccentOrange)
-                        ) { Text("Compress & Replace ⚡", color = Color.White) }
+                        ) { Text(stringResource(R.string.comp_action), color = Color.White) }
                     }
                 }
                 if (compressing) {
@@ -276,7 +285,7 @@ private fun CompressContent(onBack: () -> Unit) {
                             trackColor = cs.surfaceVariant
                         )
                         Text(
-                            "Compressing $progressDone of $progressTotal…",
+                            stringResource(R.string.comp_progress, progressDone, progressTotal),
                             fontSize = 12.sp,
                             modifier = Modifier.padding(vertical = 6.dp)
                         )
@@ -293,7 +302,7 @@ private fun CompressContent(onBack: () -> Unit) {
             ) {
                 CircularProgressIndicator(color = AccentOrange)
                 Spacer(Modifier.height(12.dp))
-                Text("Finding oversized photos…", color = cs.onSurfaceVariant)
+                Text(stringResource(R.string.comp_scanning), color = cs.onSurfaceVariant)
             }
         } else if (photos.isEmpty()) {
             Column(
@@ -302,14 +311,14 @@ private fun CompressContent(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.Center
             ) {
                 Text("🪶", fontSize = 48.sp)
-                Text("Nothing oversized found", color = cs.onSurfaceVariant)
+                Text(stringResource(R.string.comp_none), color = cs.onSurfaceVariant)
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
                 // ── Preset chips ──
                 item {
                     Text(
-                        "Quality preset",
+                        stringResource(R.string.comp_quality),
                         fontSize = 12.sp,
                         color = cs.onSurfaceVariant,
                         modifier = Modifier.padding(top = 10.dp, bottom = 6.dp)
@@ -319,7 +328,7 @@ private fun CompressContent(onBack: () -> Unit) {
                             FilterChip(
                                 selected = preset.key == p.key,
                                 onClick = { preset = p },
-                                label = { Text(p.label) }
+                                label = { Text(stringResource(p.labelRes)) }
                             )
                         }
                     }
@@ -337,7 +346,7 @@ private fun CompressContent(onBack: () -> Unit) {
                     ) {
                         Column(Modifier.padding(14.dp)) {
                             Text(
-                                "Preview on a real photo",
+                                stringResource(R.string.comp_preview_on),
                                 fontSize = 12.sp, fontWeight = FontWeight.Bold, color = onOrange
                             )
                             Spacer(Modifier.height(8.dp))
@@ -378,12 +387,12 @@ private fun CompressContent(onBack: () -> Unit) {
                                 val pct =
                                     ((before.second - after.second) * 100f / before.second).toInt()
                                 Text(
-                                    "${humanBytes(before.second)} → ${humanBytes(after.second)} · saves $pct%",
+                                    stringResource(R.string.comp_saves, humanBytes(before.second), humanBytes(after.second), pct),
                                     fontWeight = FontWeight.Bold,
                                     color = onOrange
                                 )
                             } else {
-                                Text("Previewing…", fontSize = 12.sp, color = onOrange)
+                                Text(stringResource(R.string.comp_previewing), fontSize = 12.sp, color = onOrange)
                             }
                         }
                     }
@@ -397,17 +406,17 @@ private fun CompressContent(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Photos 1 MB and bigger, biggest first",
+                            stringResource(R.string.comp_filter_sub),
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
                         )
                         TextButton(onClick = {
                             selected = photos.map { it.uri.toString() }.toSet()
-                        }) { Text("All", fontSize = 12.sp) }
+                        }) { Text(stringResource(R.string.common_all), fontSize = 12.sp) }
                         TextButton(onClick = {
                             selected = emptySet()
-                        }) { Text("None", fontSize = 12.sp) }
+                        }) { Text(stringResource(R.string.comp_none_btn), fontSize = 12.sp) }
                     }
                 }
                 items(photos, key = { it.uri.toString() }) { item ->
@@ -447,16 +456,14 @@ private fun CompressContent(onBack: () -> Unit) {
     resultSaved?.let { saved ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { resultSaved = null },
-            title = { Text("Replaced! 🪶") },
+            title = { Text(stringResource(R.string.comp_done_title)) },
             text = {
                 Text(
-                    "Compressed copies live in Pictures/Cura Compressed and the heavy " +
-                        "originals moved to Trash (recoverable ~30 days).\n\n" +
-                        "Reclaimed: ${humanBytes(saved)}"
+                    stringResource(R.string.comp_done_body, humanBytes(saved))
                 )
             },
             confirmButton = {
-                TextButton(onClick = { resultSaved = null }) { Text("Nice") }
+                TextButton(onClick = { resultSaved = null }) { Text(stringResource(R.string.comp_nice)) }
             }
         )
     }

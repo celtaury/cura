@@ -31,6 +31,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.res.stringResource
+import com.celtaury.cura.R
 
 /**
  * One permission gate for every cleaning screen.
@@ -131,12 +133,11 @@ fun PermissionGate(
                 ) {
                     Column(Modifier.fillMaxWidth().padding(16.dp)) {
                         Text(
-                            "Only some photos are shared with Cura",
+                            stringResource(R.string.perm_partial_title),
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            "You picked a few — the rest stay hidden from " +
-                                "cleaning. Allow all so nothing gets missed.",
+                            stringResource(R.string.perm_partial_body),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
@@ -145,10 +146,10 @@ fun PermissionGate(
                             Button(
                                 onClick = { launcher.launch(perms) },
                                 modifier = Modifier.weight(1f)
-                            ) { Text("Allow all") }
+                            ) { Text(stringResource(R.string.perm_allow_all)) }
                             Spacer(Modifier.width(8.dp))
                             TextButton(onClick = { coachDismissed = true }) {
-                                Text("Later")
+                                Text(stringResource(R.string.perm_later))
                             }
                         }
                     }
@@ -179,7 +180,7 @@ fun PermissionGate(
                 shape = MaterialTheme.shapes.large
             ) {
                 Text(
-                    if (askedOnce) "Try Again" else "Grant Access",
+                    if (askedOnce) stringResource(R.string.perm_try_again) else stringResource(R.string.perm_grant),
                     fontSize = MaterialTheme.typography.titleMedium.fontSize,
                     fontWeight = FontWeight.Bold
                 )

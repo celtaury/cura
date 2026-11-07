@@ -3,6 +3,7 @@ package com.celtaury.cura.core
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.celtaury.cura.R
 
 /**
  * The Suggest deck's dealer (overhaul round 1).
@@ -48,19 +49,20 @@ object SuggestEngine {
     }
 
     /** The reason line for a card — single source of truth (build + restore). */
-    fun reasonFor(item: MediaItem, tag: String): String = when (tag) {
+    fun reasonFor(context: Context, item: MediaItem, tag: String): String = when (tag) {
         "Empty file" ->
-            "Zero bytes — " + if (item.mime.startsWith("audio/"))
-                "a voice-note shell the chat app left behind"
-            else "nothing inside, pure clutter"
+            context.getString(
+                if (item.mime.startsWith("audio/")) R.string.eng_empty_audio
+                else R.string.eng_empty_other
+            )
         "Duplicate" ->
-            "Twin photo — same bytes as another shot you already have"
+            context.getString(R.string.eng_duplicate)
         "Old screenshot" ->
-            "Dusty screenshot — saved ${relativeDays(item.dateAddedSec)}"
+            context.getString(R.string.eng_dusty, relativeDays(item.dateAddedSec))
         "Stray installer" ->
-            "Forgotten installer — it does nothing just sitting there"
+            context.getString(R.string.eng_installer)
         else ->
-            "Untouched for ${relativeDays(item.dateAddedSec)}"
+            context.getString(R.string.eng_untouched, relativeDays(item.dateAddedSec))
     }
 
     /** Fallback tag for a seeded tile item that missed every scan pool. */
@@ -92,19 +94,19 @@ object SuggestEngine {
         val pool = mutableListOf<Suggestion>()
 
         Scanner.emptyFiles(context).filter(::viable).forEach {
-            pool += Suggestion(it, "Empty file", reasonFor(it, "Empty file"), 6)
+            pool += Suggestion(it, "Empty file", reasonFor(context, it, "Empty file"), 6)
         }
         Scanner.duplicateImages(context).filter(::viable).forEach {
-            pool += Suggestion(it, "Duplicate", reasonFor(it, "Duplicate"), 5)
+            pool += Suggestion(it, "Duplicate", reasonFor(context, it, "Duplicate"), 5)
         }
         Scanner.oldScreenshots(context, minAgeDays = 30).filter(::viable).forEach {
-            pool += Suggestion(it, "Old screenshot", reasonFor(it, "Old screenshot"), 4)
+            pool += Suggestion(it, "Old screenshot", reasonFor(context, it, "Old screenshot"), 4)
         }
         Scanner.apkFiles(context).filter(::viable).forEach {
-            pool += Suggestion(it, "Stray installer", reasonFor(it, "Stray installer"), 4)
+            pool += Suggestion(it, "Stray installer", reasonFor(context, it, "Stray installer"), 4)
         }
         Scanner.oldMedia(context, minAgeDays = 60).filter(::viable).forEach {
-            pool += Suggestion(it, "Old photo", reasonFor(it, "Old photo"), 3)
+            pool += Suggestion(it, "Old photo", reasonFor(context, it, "Old photo"), 3)
         }
 
         // dedupe by uri — a 0-byte screenshot is both empty AND old; keep the
@@ -136,7 +138,7 @@ object SuggestEngine {
                 ?: Suggestion(
                     item = startItem,
                     tag = familyTagOf(startItem),
-                    reason = reasonFor(startItem, familyTagOf(startItem)),
+                    reason = reasonFor(context, startItem, familyTagOf(startItem)),
                     score = 0
                 )
             listOf(seeded) + picked.filter { it.item.uri != startItem.uri }

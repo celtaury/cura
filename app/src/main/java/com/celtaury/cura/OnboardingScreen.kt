@@ -44,6 +44,7 @@ import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.mediaPermissions
 import com.celtaury.cura.ui.theme.InterBlack
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
 
 /** One-shot flag: onboarding shows only on a truly first launch. */
 object OnboardingPrefs {
@@ -98,7 +99,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
-            TextButton(onClick = { finish() }) { Text("Skip") }
+            TextButton(onClick = { finish() }) { Text(stringResource(R.string.onb_skip)) }
         }
 
         HorizontalPager(
@@ -108,10 +109,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
             when (page) {
                 0 -> OnboardingPage(
                     emoji = "🌿",
-                    title = "Meet CURA",
-                    body = "Your phone collects digital dust: duplicates, forgotten " +
-                        "screenshots, chat-app memes.\n\nCura helps you reclaim that " +
-                        "space — safely, and one beautiful card at a time."
+                    title = stringResource(R.string.onb_1_title),
+                    body = stringResource(R.string.onb_1_body)
                 )
                 1 -> {
                     Column(
@@ -120,7 +119,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            "One gesture. That's it.",
+                            stringResource(R.string.onb_gesture),
                             style = MaterialTheme.typography.headlineMedium,
                             fontFamily = InterBlack,
                             textAlign = TextAlign.Center
@@ -128,18 +127,16 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         Spacer(Modifier.height(22.dp))
                         SwipeLegendCard(
                             emoji = "🛡️",
-                            title = "Swipe right to Keep",
-                            body = "The file is protected forever — " +
-                                "no cleaner will ever touch it.",
+                            title = stringResource(R.string.onb_2_title),
+                            body = stringResource(R.string.onb_2_body),
                             container = cs.tertiaryContainer,
                             onContainer = cs.onTertiaryContainer
                         )
                         Spacer(Modifier.height(12.dp))
                         SwipeLegendCard(
                             emoji = "🧹",
-                            title = "Swipe left to Clean",
-                            body = "It joins your cleaning queue. " +
-                                "You confirm before anything happens.",
+                            title = stringResource(R.string.onb_3_title),
+                            body = stringResource(R.string.onb_3_body),
                             container = cs.errorContainer,
                             onContainer = cs.onErrorContainer
                         )
@@ -147,11 +144,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 }
                 else -> OnboardingPage(
                     emoji = "🛡️",
-                    title = "Safe by design",
-                    body = "Nothing is ever deleted without your explicit OK — " +
-                        "Android itself asks last.\n\nDeleted files rest in the system " +
-                        "Trash for ~30 days.\n\nAnd the Keep-safe list outranks " +
-                        "every cleaner in the app."
+                    title = stringResource(R.string.onb_4_title),
+                    body = stringResource(R.string.onb_4_body)
                 )
             }
         }
@@ -179,8 +173,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
         if (pagerState.currentPage == 2) {
             if (!granted) {
                 Text(
-                    "Last step: let Cura look at your photos & videos. " +
-                        "It all stays on your phone.",
+                    stringResource(R.string.onb_perm_body),
                     style = MaterialTheme.typography.bodyMedium,
                     color = cs.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -192,19 +185,19 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = MaterialTheme.shapes.large
                 ) {
-                    Text("Grant access", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.onb_grant), fontWeight = FontWeight.Bold)
                 }
                 TextButton(
                     onClick = { finish() },
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("Not now") }
+                ) { Text(stringResource(R.string.onb_not_now)) }
             } else {
                 Button(
                     onClick = { finish() },
                     modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = MaterialTheme.shapes.large
                 ) {
-                    Text("Let's go 🌿", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.onb_go), fontWeight = FontWeight.Bold)
                 }
             }
         } else {
@@ -219,7 +212,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = MaterialTheme.shapes.large
             ) {
-                Text("Next", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.onb_next), fontWeight = FontWeight.Bold)
             }
         }
         Spacer(Modifier.height(12.dp))

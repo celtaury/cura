@@ -114,6 +114,8 @@ import com.celtaury.cura.ui.theme.StorageFillGradient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 
 private data class FeatureTile(
     val title: String,
@@ -185,7 +187,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
         sheetItem = null
         pickVersion++
         scope.launch { refreshAll() }
-        Toast.makeText(context, "Cleaned — Cura remembers 🌿", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.dash_cleaned_memory), Toast.LENGTH_SHORT).show()
     })
 
     Box(
@@ -248,12 +250,12 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                "Photo access needed",
+                                stringResource(R.string.dash_perm_title),
                                 fontWeight = FontWeight.Bold,
                                 color = cs.onErrorContainer
                             )
                             Text(
-                                "Grant access so Cura can scan and suggest cleanups.",
+                                stringResource(R.string.dash_perm_body),
                                 fontSize = 12.sp,
                                 color = cs.onErrorContainer
                             )
@@ -267,7 +269,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                                 contentColor = cs.errorContainer
                             )
                         ) {
-                            Text("Grant")
+                            Text(stringResource(R.string.dash_grant))
                         }
                     }
                 }
@@ -282,7 +284,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
                     Text(
-                        "🌿 Cura has saved you ${humanBytes(savedBytes)} so far",
+                        stringResource(R.string.dash_saved_so_far, humanBytes(savedBytes)),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = cs.onTertiaryContainer
@@ -310,7 +312,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Device Storage",
+                            stringResource(R.string.dash_device_storage),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             color = cs.onSurfaceVariant
@@ -323,7 +325,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                         ) {
                             Text(
                                 if (storageInfo != null)
-                                    "${(storageInfo!!.percentageUsed * 100).toInt()}% Full"
+                                    stringResource(R.string.dash_full_pct, (storageInfo!!.percentageUsed * 100).toInt())
                                 else "…",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
@@ -334,7 +336,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     Text(
                         if (storageInfo != null)
-                            "${humanBytes(storageInfo!!.usedBytes)} used of ${humanBytes(storageInfo!!.totalBytes)}"
+                            stringResource(R.string.common_used_of, humanBytes(storageInfo!!.usedBytes), humanBytes(storageInfo!!.totalBytes))
                         else "Calculating…",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
@@ -360,7 +362,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     if (storageInfo != null) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "${humanBytes(storageInfo!!.freeBytes)} free",
+                            stringResource(R.string.common_free, humanBytes(storageInfo!!.freeBytes)),
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant
                         )
@@ -392,7 +394,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "Quick Clean",
+                    stringResource(R.string.dash_quick_clean),
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = cs.onSurface
@@ -458,7 +460,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                             ) {
                                 Text(
                                     when {
-                                        p.deckRoute.isEmpty() -> "Abandoned Photo Found!"
+                                        p.deckRoute.isEmpty() -> stringResource(R.string.family_abandoned)
                                         else -> p.familyTitle
                                     },
                                     fontSize = 16.sp,
@@ -469,9 +471,9 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                                 Text(
                                     when {
                                         p.deckRoute.isEmpty() ->
-                                            "${p.item.displayName} · ${relativeDays(p.item.dateAddedSec)}"
+                                            stringResource(R.string.dash_tile_name, p.item.displayName, relativeDays(p.item.dateAddedSec))
                                         else ->
-                                            "${p.reason} · ${p.familyCount} files · ${humanBytes(p.familyBytes)}"
+                                            pluralStringResource(R.plurals.dash_tile_meta, p.familyCount, p.reason, p.familyCount, humanBytes(p.familyBytes))
                                     },
                                     fontSize = 12.sp,
                                     color = Color.White.copy(alpha = 0.85f),
@@ -491,13 +493,13 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                                 Text("🌿", fontSize = 40.sp)
                                 Spacer(Modifier.height(8.dp))
                                 Text(
-                                    "All caught up",
+                                    stringResource(R.string.dash_all_caught),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     color = cs.onSurface
                                 )
                                 Text(
-                                    "Gallery is fresh & clean",
+                                    stringResource(R.string.dash_fresh),
                                     fontSize = 11.sp,
                                     color = cs.onSurfaceVariant
                                 )
@@ -515,7 +517,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 ) {
                     MiniFeatureCard(
                         modifier = Modifier.weight(1f),
-                        title = "Photo Compress",
+                        title = stringResource(R.string.dash_open_compress),
                         icon = Icons.Default.AutoAwesome,
                         iconBg = orangeContainer,
                         iconTint = AccentOrange
@@ -523,7 +525,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
 
                     MiniFeatureCard(
                         modifier = Modifier.weight(1f),
-                        title = "Social Cleaner",
+                        title = stringResource(R.string.soc_title),
                         icon = Icons.AutoMirrored.Filled.Message,
                         iconBg = Color(0xFFDCF8C6),
                         iconTint = Color(0xFF1E5B22)
@@ -536,7 +538,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
             // ── Secondary Tiles (Review Gallery removed to avoid redundancy) ──
             val tiles = listOf(
                 FeatureTile(
-                    "Browse Gallery",
+                    stringResource(R.string.dash_open_browse),
                     Icons.Default.CalendarMonth,
                     "browse_gallery",
                     cs.secondaryContainer,
@@ -550,7 +552,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     cs.error
                 ),
                 FeatureTile(
-                    "More Tools",
+                    stringResource(R.string.dash_open_more),
                     Icons.Default.MoreHoriz,
                     "more",
                     cs.surfaceVariant,
@@ -648,7 +650,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     }
                 )
                 Text(
-                    "Swipe Up",
+                    stringResource(R.string.dash_swipe_up),
                     fontSize = 24.sp,
                     fontFamily = InterBlack,
                     fontWeight = FontWeight.Bold,
@@ -756,14 +758,14 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 pickVersion++
                 scope.launch {
                     val result = snackbarHostState.showSnackbar(
-                        message = "Saved to Keep-safe 🛡️",
+                        message = context.getString(R.string.common_saved_ks),
                         actionLabel = "Undo",
                         duration = SnackbarDuration.Short
                     )
                     if (result == SnackbarResult.ActionPerformed) {
                         KeepSafe.remove(context, kept.uri)
                         pickVersion++
-                        Toast.makeText(context, "Protection removed", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.common_prot_removed_one), Toast.LENGTH_SHORT).show()
                     }
                 }
             },
@@ -901,19 +903,19 @@ private fun ForgottenPhotoSheet(
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                "Abandoned Photo Found!",
+                stringResource(R.string.family_abandoned),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "${item.displayName} · ${humanBytes(item.sizeBytes)} · added ${relativeDays(item.dateAddedSec)}",
+                stringResource(R.string.dash_photo_meta, item.displayName, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec)),
                 style = MaterialTheme.typography.bodyMedium,
                 color = cs.onSurfaceVariant
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "This photo has remained untouched in your gallery for months. Would you like to keep it safe or delete it?",
+                stringResource(R.string.dash_forgotten_body),
                 style = MaterialTheme.typography.bodyMedium,
                 color = cs.onSurfaceVariant
             )
@@ -935,7 +937,7 @@ private fun ForgottenPhotoSheet(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text("Keep Safe")
+                    Text(stringResource(R.string.common_keep_btn))
                 }
                 Button(
                     onClick = onClean,
@@ -951,7 +953,7 @@ private fun ForgottenPhotoSheet(
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text("Delete")
+                    Text(stringResource(R.string.common_delete_btn))
                 }
             }
             Spacer(Modifier.height(24.dp))

@@ -94,6 +94,9 @@ import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import com.celtaury.cura.R
 
 /**
  * In-memory handoff for decks whose items are already known
@@ -111,8 +114,8 @@ object DeckSource {
 }
 
 private class DeckSpec(
-    val title: String,
-    val subtitle: String,
+    val titleRes: Int,
+    val subtitleRes: Int,
     val loader: (suspend (Context) -> List<MediaItem>)? = null
 )
 
@@ -127,29 +130,29 @@ private data class DeckDecision(
 
 /** Route → deck registry. loader == null → memory-backed via [DeckSource]. */
 private val deckSpecs = mapOf(
-    "deck_gallery" to DeckSpec("Gallery Review", "Oldest first · swipe to judge") { Scanner.galleryDeck(it) },
-    "deck_oldmedia" to DeckSpec("Old Media", "Untouched for 60+ days") { Scanner.oldMedia(it) },
-    "deck_empty" to DeckSpec("Empty Files", "Zero bytes, pure clutter"),
-    "deck_apks" to DeckSpec("APK Installers", "Forgotten installer files"),
-    "deck_dupes" to DeckSpec("Duplicate Photos", "Same picture, many copies"),
-    "deck_shots" to DeckSpec("Old Screenshots", "Untouched for 30+ days"),
-    "deck_qc_all" to DeckSpec("Quick Clean Review", "Everything the scan found"),
-    "deck_soc_all" to DeckSpec("WhatsApp Media", "All types · swipe to judge"),
-    "deck_soc_images" to DeckSpec("WhatsApp Images", "Swipe to judge"),
-    "deck_soc_videos" to DeckSpec("WhatsApp Videos", "Swipe to judge"),
-    "deck_soc_docs" to DeckSpec("WhatsApp Documents", "Deleting breaks chat media"),
-    "deck_soc_audio" to DeckSpec("WhatsApp Audio", "Voice notes live here — care!"),
-    "deck_soc_stickers" to DeckSpec("WhatsApp Stickers", "Tiny files · usually harmless")
+    "deck_gallery" to DeckSpec(R.string.deck_gallery_title, R.string.deck_gallery_subtitle) { Scanner.galleryDeck(it) },
+    "deck_oldmedia" to DeckSpec(R.string.deck_oldmedia_title, R.string.deck_oldmedia_subtitle) { Scanner.oldMedia(it) },
+    "deck_empty" to DeckSpec(R.string.deck_empty_title, R.string.deck_empty_subtitle),
+    "deck_apks" to DeckSpec(R.string.deck_apks_title, R.string.deck_apks_subtitle),
+    "deck_dupes" to DeckSpec(R.string.deck_dupes_title, R.string.deck_dupes_subtitle),
+    "deck_shots" to DeckSpec(R.string.deck_shots_title, R.string.deck_shots_subtitle),
+    "deck_qc_all" to DeckSpec(R.string.deck_qc_all_title, R.string.deck_qc_all_subtitle),
+    "deck_soc_all" to DeckSpec(R.string.deck_soc_all_title, R.string.deck_soc_all_subtitle),
+    "deck_soc_images" to DeckSpec(R.string.deck_soc_images_title, R.string.deck_soc_images_subtitle),
+    "deck_soc_videos" to DeckSpec(R.string.deck_soc_videos_title, R.string.deck_soc_videos_subtitle),
+    "deck_soc_docs" to DeckSpec(R.string.deck_soc_docs_title, R.string.deck_soc_docs_subtitle),
+    "deck_soc_audio" to DeckSpec(R.string.deck_soc_audio_title, R.string.deck_soc_audio_subtitle),
+    "deck_soc_stickers" to DeckSpec(R.string.deck_soc_stickers_title, R.string.deck_soc_stickers_subtitle)
 )
 
 /** Entry used by MainActivity for every "deck_" route. */
 @Composable
 fun DeckFlowForRoute(route: String, onBack: () -> Unit) {
-    val spec = deckSpecs[route] ?: DeckSpec("Review", "Swipe to judge")
+    val spec = deckSpecs[route] ?: DeckSpec(R.string.deck_fb_title, R.string.deck_fb_subtitle)
     DeckFlow(
         route = route,
-        title = spec.title,
-        subtitle = spec.subtitle,
+        title = stringResource(spec.titleRes),
+        subtitle = stringResource(spec.subtitleRes),
         loader = spec.loader,
         onBack = onBack
     )
@@ -166,8 +169,7 @@ fun DeckFlow(
 ) {
     PermissionGate(
         title = title,
-        description = "Cura needs media access to show things worth reviewing. " +
-            "Nothing is touched without your say-so."
+        description = stringResource(R.string.deck_perm_desc)
     ) {
         DeckContent(
             route = route,
@@ -279,7 +281,7 @@ private fun DeckContent(
         persist()
         phase = "deck"
         scope.launch {
-            snack.showSnackbar("↺ Back one card")
+            snack.showSnackbar(context.getString(R.string.deck_back_one))
         }
     }
 
@@ -304,7 +306,7 @@ private fun DeckContent(
         DeckPrefs.setQueue(context, route, emptyList())
         scope.launch {
             snack.showSnackbar(
-                "Purged $count item${if (count == 1) "" else "s"} · ${humanBytes(bytes)} freed 🎉"
+                context.resources.getQuantityString(R.plurals.common_purged_n, count, count, humanBytes(bytes))
             )
         }
     })
@@ -332,7 +334,7 @@ private fun DeckContent(
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -350,8 +352,10 @@ private fun DeckContent(
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            ("${index + 1} / ${items.size}" +
-                                if (queue.isNotEmpty()) " · ${queue.size} queued" else ""),
+                            (if (queue.isNotEmpty())
+                                stringResource(R.string.common_counter_q, index + 1, items.size, queue.size)
+                            else
+                                stringResource(R.string.common_counter, index + 1, items.size)),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = cs.onSurfaceVariant
@@ -373,7 +377,7 @@ private fun DeckContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "📅 $curLabel · $curLeft left ▾",
+                                stringResource(R.string.deck_month_pill, curLabel, curLeft),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -392,7 +396,7 @@ private fun DeckContent(
             ) {
                 CircularProgressIndicator(color = cs.primary, modifier = Modifier.size(56.dp))
                 Spacer(Modifier.height(14.dp))
-                Text("Gathering things to review…", color = cs.onSurfaceVariant)
+                Text(stringResource(R.string.deck_loading), color = cs.onSurfaceVariant)
             }
 
             "empty" -> Column(
@@ -403,17 +407,17 @@ private fun DeckContent(
                 Text("🌿", fontSize = 52.sp)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    if (sessionSaved > 0L) "Deck cleared!" else "All clean ✨",
+                    if (sessionSaved > 0L) stringResource(R.string.common_deck_cleared) else stringResource(R.string.common_all_clean),
                     style = MaterialTheme.typography.headlineSmall
                 )
                 Text(
-                    "Nothing left to judge here.",
+                    stringResource(R.string.common_nothing_left),
                     color = cs.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.height(20.dp))
                 Button(onClick = onBack, shape = MaterialTheme.shapes.large) {
-                    Text("Back home")
+                    Text(stringResource(R.string.common_back_home))
                 }
             }
 
@@ -526,7 +530,7 @@ private fun DeckPhase(
     Column(Modifier.fillMaxSize()) {
         if (resumedAt in 1 until items.size && index == resumedAt) {
             Text(
-                "Resumed where you left off · card #${index + 1}",
+                stringResource(R.string.common_resumed_card, index + 1),
                 fontSize = 12.sp,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp)
@@ -598,9 +602,9 @@ private fun DeckPhase(
                     containerColor = cs.tertiaryContainer,
                     contentColor = cs.onTertiaryContainer
                 )
-            ) { Text("🛡️ Keep", fontWeight = FontWeight.Bold) }
+            ) { Text(stringResource(R.string.common_btn_keep), fontWeight = FontWeight.Bold) }
             TextButton(onClick = onUndo, enabled = canUndo) {
-                Text("↺ Undo")
+                Text(stringResource(R.string.common_btn_undo))
             }
             Button(
                 onClick = { current?.let { onDecide(it, "queued") } },
@@ -610,7 +614,7 @@ private fun DeckPhase(
                     containerColor = cs.errorContainer,
                     contentColor = cs.onErrorContainer
                 )
-            ) { Text("🧹 Clean", fontWeight = FontWeight.Bold) }
+            ) { Text(stringResource(R.string.common_btn_clean), fontWeight = FontWeight.Bold) }
         }
         // thumb-zone purge CTA — pulses when the queue grows
         if (queueSize > 0) {
@@ -632,7 +636,7 @@ private fun DeckPhase(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "$queueSize queued · tap to purge 🧹",
+                        stringResource(R.string.common_queued_purge, queueSize),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = cs.onErrorContainer
@@ -644,7 +648,7 @@ private fun DeckPhase(
         // pill takes over as the single call to action, so it stays unmissable.
         if (queueSize == 0) {
             Text(
-                "Swipe right 🛡️ to keep safe · swipe left 🧹 to queue for cleaning · tap to preview",
+                stringResource(R.string.common_swipe_hint),
                 fontSize = 11.sp,
                 color = cs.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -767,7 +771,7 @@ internal fun DeckCard(
                         ) {
                             Icon(
                                 Icons.Default.PlayCircle,
-                                contentDescription = "Preview video",
+                                contentDescription = stringResource(R.string.common_preview_video_cd),
                                 tint = Color.White.copy(alpha = 0.85f),
                                 modifier = Modifier.size(56.dp)
                             )
@@ -787,7 +791,7 @@ internal fun DeckCard(
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            "No visual preview",
+                            stringResource(R.string.deck_no_preview),
                             style = MaterialTheme.typography.bodyMedium,
                             color = cs.onSurfaceVariant,
                             textAlign = TextAlign.Center
@@ -800,8 +804,8 @@ internal fun DeckCard(
                 Text(item.displayName, maxLines = 1, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "${humanBytes(item.sizeBytes)} · ${relativeDays(item.dateAddedSec)}" +
-                        if (!isMedia) " · file" else "",
+                    stringResource(R.string.deck_card_meta, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec)) +
+                        if (!isMedia) " · " + stringResource(R.string.common_file_word) else "",
                     fontSize = 12.sp,
                     color = cs.onSurfaceVariant
                 )
@@ -810,7 +814,7 @@ internal fun DeckCard(
         // swipe hints
         if (offsetX.value > 20f) {
             SwipeHint(
-                text = "KEEP SAFE 🛡️",
+                text = stringResource(R.string.deck_label_keep),
                 color = cs.onTertiaryContainer,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
@@ -820,7 +824,7 @@ internal fun DeckCard(
         }
         if (offsetX.value < -20f) {
             SwipeHint(
-                text = "CLEAN 🧹",
+                text = stringResource(R.string.deck_label_clean),
                 color = cs.onErrorContainer,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
@@ -916,12 +920,12 @@ private fun MonthPickerSheet(
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
             Text(
-                "Jump to a month",
+                stringResource(R.string.deck_jump_month),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "Per-month progress · tap a month to jump to its first un-judged card",
+                stringResource(R.string.deck_month_sub),
                 fontSize = 12.sp,
                 color = cs.onSurfaceVariant
             )
@@ -947,9 +951,9 @@ private fun MonthPickerSheet(
                         )
                         Text(
                             when {
-                                isCurrent -> "you are here"
-                                left > 0 -> "$left to judge"
-                                else -> "✓ judged"
+                                isCurrent -> stringResource(R.string.deck_here)
+                                left > 0 -> stringResource(R.string.deck_n_to_judge, left)
+                                else -> stringResource(R.string.deck_judged)
                             },
                             fontSize = 12.sp,
                             color = if (left > 0 && !isCurrent) cs.primary else cs.onSurfaceVariant,
@@ -984,10 +988,10 @@ internal fun SummaryPhase(
         Spacer(Modifier.weight(1f))
         Text("🧺", fontSize = 56.sp)
         Spacer(Modifier.height(14.dp))
-        Text("Ready when you are", style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(R.string.deck_ready), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(6.dp))
         Text(
-            "${queued.size} item${if (queued.size == 1) "" else "s"} · ~${humanBytes(bytes)}",
+            pluralStringResource(R.plurals.deck_queue_summary, queued.size, queued.size, humanBytes(bytes)),
             style = MaterialTheme.typography.titleLarge,
             color = cs.primary,
             fontWeight = FontWeight.Bold
@@ -1032,8 +1036,7 @@ internal fun SummaryPhase(
                 colors = CardDefaults.cardColors(containerColor = cs.errorContainer)
             ) {
                 Text(
-                    "⚠️ Documents, audio or stickers are in this batch. Deleting them " +
-                        "can show \"media deleted\" inside your chats.",
+                    stringResource(R.string.deck_mixed_warning),
                     fontSize = 13.sp,
                     color = cs.onErrorContainer,
                     modifier = Modifier.padding(12.dp)
@@ -1046,9 +1049,9 @@ internal fun SummaryPhase(
             enabled = queued.isNotEmpty(),
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = MaterialTheme.shapes.large
-        ) { Text("Confirm & Clean 🧹", fontWeight = FontWeight.Bold) }
+        ) { Text(stringResource(R.string.common_confirm_clean), fontWeight = FontWeight.Bold) }
         TextButton(onClick = onLater, modifier = Modifier.padding(top = 6.dp)) {
-            Text("Keep for later — your queue is saved")
+            Text(stringResource(R.string.deck_keep_later))
         }
         Spacer(Modifier.height(18.dp))
     }
@@ -1086,15 +1089,15 @@ private fun DonePhase(sessionSaved: Long, allTimeSaved: Long, onBack: () -> Unit
                 }
         )
         Spacer(Modifier.height(16.dp))
-        Text("Cleaned! 🎉", style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.common_cleaned_done), style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(6.dp))
         Text(
-            "You just freed ${humanBytes(sessionSaved)}",
+            stringResource(R.string.common_freed_now, humanBytes(sessionSaved)),
             style = MaterialTheme.typography.titleMedium,
             color = cs.onSurfaceVariant
         )
         Text(
-            "🌿 Cura has saved you ${humanBytes(allTimeSaved)} all-time",
+            stringResource(R.string.common_freed_all, humanBytes(allTimeSaved)),
             style = MaterialTheme.typography.bodyMedium,
             color = cs.tertiary,
             fontWeight = FontWeight.SemiBold
@@ -1104,7 +1107,7 @@ private fun DonePhase(sessionSaved: Long, allTimeSaved: Long, onBack: () -> Unit
             onClick = onBack,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = MaterialTheme.shapes.large
-        ) { Text("Done", fontWeight = FontWeight.Bold) }
+        ) { Text(stringResource(R.string.common_done), fontWeight = FontWeight.Bold) }
     }
 }
 
@@ -1135,22 +1138,19 @@ private fun DeckCoachMarks(onDone: () -> Unit) {
             ) {
                 Column(Modifier.fillMaxWidth().padding(24.dp)) {
                     Text(
-                        "How this works",
+                        stringResource(R.string.deck_coach_title),
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "👈 Swipe left — mark for cleaning\n" +
-                            "👉 Swipe right — keep safe\n" +
-                            "👆 Tap a card — look closer first",
+                        stringResource(R.string.deck_coach_body),
                         fontSize = 15.sp,
                         lineHeight = 26.sp
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Nothing is deleted until you tap Clean — and it stays " +
-                            "recoverable for ~30 days.",
+                        stringResource(R.string.deck_coach_note),
                         fontSize = 12.sp,
                         color = cs.onSurfaceVariant
                     )
@@ -1159,7 +1159,7 @@ private fun DeckCoachMarks(onDone: () -> Unit) {
                         onClick = onDone,
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = MaterialTheme.shapes.large
-                    ) { Text("Got it", fontWeight = FontWeight.Bold) }
+                    ) { Text(stringResource(R.string.deck_coach_ok), fontWeight = FontWeight.Bold) }
                 }
             }
         }

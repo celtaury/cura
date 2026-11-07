@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.ui.deck.DeckFlow
 import com.celtaury.cura.ui.deck.DeckFlowForRoute
+import androidx.compose.ui.res.stringResource
 
 /**
  * Screenshots deck, UX v2: shared Swipe Deck over the 30-day-old screenshot pile.
@@ -12,8 +13,8 @@ import com.celtaury.cura.ui.deck.DeckFlowForRoute
 fun OldScreenshotsScreen(onBack: () -> Unit) {
     DeckFlow(
         route = "screenshots",
-        title = "Old Screenshots",
-        subtitle = "Gathering dust for 30+ days",
+        title = stringResource(R.string.deck_shots_title),
+        subtitle = stringResource(R.string.os_sub),
         loader = { context -> Scanner.oldScreenshots(context, minAgeDays = 30) },
         onBack = onBack
     )

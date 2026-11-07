@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Toast
+import com.celtaury.cura.core.CuraStrings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -62,6 +63,8 @@ import com.celtaury.cura.core.tryRestoreFromTrash
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 
 /**
  * One row in the recovery list. Two sources feed it:
@@ -136,23 +139,24 @@ fun TrashScreen(onBack: () -> Unit) {
             val restored = tryRestoreFromTrash(context, picked.map { it.uri })
             when {
                 restored == total -> {
-                    val word = if (total == 1) "file" else "files"
                     Toast.makeText(
                         context,
-                        "Back in your gallery: $restored $word 🌿",
+                        context.resources.getQuantityString(
+                            R.plurals.trash_back_gallery, restored, restored
+                        ),
                         Toast.LENGTH_LONG
                     ).show()
                 }
                 restored > 0 ->
                     Toast.makeText(
                         context,
-                        "Restored $restored of $total — the rest may need the Files app → Trash",
+                        context.getString(R.string.trash_partial, restored, total),
                         Toast.LENGTH_LONG
                     ).show()
                 else ->
                     Toast.makeText(
                         context,
-                        "Android kept them locked — open the Files app → Trash to restore",
+                        context.getString(R.string.trash_locked),
                         Toast.LENGTH_LONG
                     ).show()
             }
@@ -175,7 +179,7 @@ fun TrashScreen(onBack: () -> Unit) {
         if (!ok) {
             Toast.makeText(
                 context,
-                "Open your Files app, then look for “Trash”",
+                context.getString(R.string.common_files_hint),
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -187,9 +191,9 @@ fun TrashScreen(onBack: () -> Unit) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Trash & recovery", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text(stringResource(R.string.trash_title), fontWeight = FontWeight.Bold, fontSize = 20.sp)
                         Text(
-                            "Everything Cura deleted — back in one tap",
+                            stringResource(R.string.trash_subtitle),
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant
                         )
@@ -197,7 +201,7 @@ fun TrashScreen(onBack: () -> Unit) {
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -221,15 +225,13 @@ fun TrashScreen(onBack: () -> Unit) {
                     ) {
                         Column(Modifier.fillMaxWidth().padding(18.dp)) {
                             Text(
-                                "This Android keeps its trash in the Files app",
+                                stringResource(R.string.trash_files_only),
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "1. Open your Files app\n" +
-                                    "2. Tap Library or Menu\n" +
-                                    "3. Tap Trash — restore what you miss",
+                                stringResource(R.string.trash_files_steps),
                                 fontSize = 13.sp
                             )
                             Spacer(Modifier.height(10.dp))
@@ -237,14 +239,14 @@ fun TrashScreen(onBack: () -> Unit) {
                                 onClick = { openFilesApp() },
                                 modifier = Modifier.fillMaxWidth().height(48.dp),
                                 shape = MaterialTheme.shapes.large
-                            ) { Text("Open the Files app") }
+                            ) { Text(stringResource(R.string.trash_open_files)) }
                         }
                     }
                 }
 
                 loading ->
                     Text(
-                        "Looking into the trash…",
+                        stringResource(R.string.trash_loading),
                         fontSize = 13.sp,
                         color = cs.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -260,11 +262,10 @@ fun TrashScreen(onBack: () -> Unit) {
                         colors = CardDefaults.cardColors(containerColor = cs.surface)
                     ) {
                         Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                            Text("Nothing waiting right now 🌿", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(stringResource(R.string.trash_empty_title), fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "When Cura deletes something, it is listed here for " +
-                                    "about 30 days — and you can bring it back with one tap.",
+                                stringResource(R.string.trash_empty_body),
                                 fontSize = 13.sp
                             )
                         }
@@ -276,7 +277,7 @@ fun TrashScreen(onBack: () -> Unit) {
                     val totalBytes = files.sumOf { it.bytes }
                     val noun = if (files.size == 1) "file" else "files"
                     Text(
-                        "${files.size} $noun · ${humanBytes(totalBytes)} waiting",
+                        pluralStringResource(R.plurals.trash_waiting, files.size, files.size, humanBytes(totalBytes)),
                         fontSize = 13.sp,
                         color = cs.onSurfaceVariant,
                         modifier = Modifier.padding(top = 10.dp, bottom = 8.dp)
@@ -296,19 +297,16 @@ fun TrashScreen(onBack: () -> Unit) {
                         shape = MaterialTheme.shapes.large
                     ) {
                         Text(
-                            if (restoring) "Bringing them back…" else "Restore everything",
+                            if (restoring) stringResource(R.string.trash_restoring) else stringResource(R.string.trash_restore_all),
                             fontWeight = FontWeight.Bold
                         )
                     }
                     TextButton(
                         onClick = { openFilesApp() },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Or open the Files app") }
+                    ) { Text(stringResource(R.string.trash_open_files_instead)) }
                     Text(
-                        "Cura lists everything it deleted here. Android hides the " +
-                            "rest of the phone's trash from apps — your Files app " +
-                            "shows the full picture. Files vanish for good only " +
-                            "when Android clears the trash; Cura never does.",
+                        stringResource(R.string.trash_footer),
                         fontSize = 11.sp,
                         color = cs.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -355,7 +353,7 @@ private fun TrashRow(file: TrashedFile, onRestore: () -> Unit) {
                     color = cs.onSurfaceVariant
                 )
             }
-            TextButton(onClick = onRestore) { Text("Restore") }
+            TextButton(onClick = onRestore) { Text(stringResource(R.string.trash_restore)) }
         }
     }
 }
@@ -372,9 +370,9 @@ private fun metaLine(file: TrashedFile): String {
 private fun agoLabel(trashedAtMs: Long): String {
     val days = (System.currentTimeMillis() - trashedAtMs) / 86_400_000L
     return when {
-        days <= 0 -> "deleted today"
-        days == 1L -> "deleted yesterday"
-        else -> "deleted $days days ago"
+        days <= 0 -> CuraStrings.s(R.string.trash_deleted_today)
+        days == 1L -> CuraStrings.s(R.string.trash_deleted_yesterday)
+        else -> CuraStrings.s(R.string.trash_deleted_ago, days)
     }
 }
 
@@ -390,11 +388,11 @@ private fun purgeLabel(file: TrashedFile): String {
         else -> null
     }
     return when {
-        daysLeft == null -> "recoverable"
-        daysLeft <= 0 -> "purges any day now"
-        daysLeft == 1L -> "purges tomorrow"
-        file.fromLog -> "purges in ~$daysLeft days"
-        else -> "purges in $daysLeft days"
+        daysLeft == null -> CuraStrings.s(R.string.trash_recoverable)
+        daysLeft <= 0 -> CuraStrings.s(R.string.trash_purges_now)
+        daysLeft == 1L -> CuraStrings.s(R.string.trash_purges_tomorrow)
+        file.fromLog -> CuraStrings.s(R.string.trash_purges_tilde, daysLeft)
+        else -> CuraStrings.s(R.string.trash_purges_in, daysLeft)
     }
 }
 

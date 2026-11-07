@@ -73,6 +73,7 @@ import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.stringResource
 
 /**
  * Suggested for you — the reason-first deck (overhaul round 1).
@@ -90,9 +91,8 @@ private const val DECK_ID = "suggest"
 @Composable
 fun SuggestScreen(onBack: () -> Unit) {
     PermissionGate(
-        title = "Suggested for you",
-        description = "Cura needs media access to pick things worth a second look. " +
-            "Nothing is touched without your say-so."
+        title = stringResource(R.string.sug_title),
+        description = stringResource(R.string.sug_perm_desc)
     ) {
         SuggestContent(onBack = onBack)
     }
@@ -127,7 +127,7 @@ private fun SuggestContent(onBack: () -> Unit) {
             restored = saved.mapNotNull { (id, tag) ->
                 val item = byId[id] ?: return@mapNotNull null
                 if (KeepSafe.contains(context, item.uri)) return@mapNotNull null
-                SuggestEngine.Suggestion(item, tag, SuggestEngine.reasonFor(item, tag), 0)
+                SuggestEngine.Suggestion(item, tag, SuggestEngine.reasonFor(context, item, tag), 0)
             }
         }
         if (seed == null && restored.size >= 2) {
@@ -244,7 +244,7 @@ private fun SuggestContent(onBack: () -> Unit) {
             DeckPrefs.setQueue(context, DECK_ID, emptyList())
             scope.launch {
                 snack.showSnackbar(
-                    "Purged $count item${if (count == 1) "" else "s"} · ${humanBytes(bytes)} freed 🎉"
+                    context.resources.getQuantityString(R.plurals.common_purged_n, count, count, humanBytes(bytes))
                 )
             }
         },
@@ -260,7 +260,7 @@ private fun SuggestContent(onBack: () -> Unit) {
             dealFresh(context, null) { fresh ->
                 if (fresh.isEmpty()) {
                     scope.launch {
-                        snack.showSnackbar("Nothing new right now — you're all caught up 🌿")
+                        snack.showSnackbar(context.getString(R.string.sug_all_caught))
                     }
                     if (sessionSaved > 0L) phase = "done" else phase = "empty"
                 } else {
@@ -283,9 +283,9 @@ private fun SuggestContent(onBack: () -> Unit) {
                 TopAppBar(
                     title = {
                         Column {
-                            Text("Suggested for you", fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.sug_title), fontWeight = FontWeight.Bold)
                             Text(
-                                "A little at a time · nothing touched without you",
+                                stringResource(R.string.sug_sub),
                                 fontSize = 12.sp,
                                 color = cs.onSurfaceVariant
                             )
@@ -293,7 +293,7 @@ private fun SuggestContent(onBack: () -> Unit) {
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -311,8 +311,10 @@ private fun SuggestContent(onBack: () -> Unit) {
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            ("${index + 1} / ${cards.size}" +
-                                if (queue.isNotEmpty()) " · ${queue.size} queued" else ""),
+                            (if (queue.isNotEmpty())
+                                stringResource(R.string.common_counter_q, index + 1, cards.size, queue.size)
+                            else
+                                stringResource(R.string.common_counter, index + 1, cards.size)),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = cs.onSurfaceVariant
@@ -331,7 +333,7 @@ private fun SuggestContent(onBack: () -> Unit) {
             ) {
                 CircularProgressIndicator(modifier = Modifier.size(56.dp), color = cs.primary)
                 Spacer(Modifier.height(14.dp))
-                Text("Picking things worth a second look…", color = cs.onSurfaceVariant)
+                Text(stringResource(R.string.sug_loading), color = cs.onSurfaceVariant)
             }
 
             "empty" -> Column(
@@ -342,11 +344,11 @@ private fun SuggestContent(onBack: () -> Unit) {
                 Text("🌿", fontSize = 52.sp)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    if (sessionSaved > 0L) "Deck cleared!" else "All clean ✨",
+                    if (sessionSaved > 0L) stringResource(R.string.common_deck_cleared) else stringResource(R.string.common_all_clean),
                     style = MaterialTheme.typography.headlineSmall
                 )
                 Text(
-                    "Nothing left to judge here.",
+                    stringResource(R.string.common_nothing_left),
                     color = cs.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
@@ -354,8 +356,8 @@ private fun SuggestContent(onBack: () -> Unit) {
                 Button(
                     onClick = { dealMore() },
                     shape = MaterialTheme.shapes.large
-                ) { Text("Give me 10 more ↻", fontWeight = FontWeight.Bold) }
-                TextButton(onClick = onBack) { Text("Back home") }
+                ) { Text(stringResource(R.string.sug_more), fontWeight = FontWeight.Bold) }
+                TextButton(onClick = onBack) { Text(stringResource(R.string.common_back_home)) }
             }
 
             "deck" -> DeckPhase(
@@ -443,7 +445,7 @@ private fun DeckPhase(
     Column(Modifier.fillMaxSize()) {
         if (resumedAt in 1 until cards.size && index == resumedAt) {
             Text(
-                "Resumed where you left off · card #${index + 1}",
+                stringResource(R.string.common_resumed_card, index + 1),
                 fontSize = 12.sp,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp)
@@ -460,14 +462,14 @@ private fun DeckPhase(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "$queueSize queued 🧹",
+                    stringResource(R.string.common_n_queued_broom, queueSize),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = cs.onErrorContainer
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "tap to purge",
+                    stringResource(R.string.common_tap_purge),
                     fontSize = 12.sp,
                     color = cs.onErrorContainer.copy(alpha = 0.7f)
                 )
@@ -566,9 +568,9 @@ private fun DeckPhase(
                     containerColor = cs.tertiaryContainer,
                     contentColor = cs.onTertiaryContainer
                 )
-            ) { Text("🛡️ Keep", fontWeight = FontWeight.Bold) }
+            ) { Text(stringResource(R.string.common_btn_keep), fontWeight = FontWeight.Bold) }
             TextButton(onClick = onUndo, enabled = canUndo && index > 0) {
-                Text("↺ Undo")
+                Text(stringResource(R.string.common_btn_undo))
             }
             Button(
                 onClick = { current?.let { onDecide(it.item, "queued") } },
@@ -578,10 +580,10 @@ private fun DeckPhase(
                     containerColor = cs.errorContainer,
                     contentColor = cs.onErrorContainer
                 )
-            ) { Text("🧹 Clean", fontWeight = FontWeight.Bold) }
+            ) { Text(stringResource(R.string.common_btn_clean), fontWeight = FontWeight.Bold) }
         }
         Text(
-            "Swipe right 🛡️ to keep safe · swipe left 🧹 to queue for cleaning · tap to preview",
+            stringResource(R.string.common_swipe_hint),
             fontSize = 11.sp,
             color = cs.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -592,7 +594,7 @@ private fun DeckPhase(
             modifier = Modifier.align(Alignment.CenterHorizontally)
         ) {
             Text(
-                "Not today — deal another ↻",
+                stringResource(R.string.sug_not_today),
                 fontSize = 12.sp,
                 color = cs.onSurfaceVariant
             )
@@ -637,15 +639,15 @@ private fun SuggestDonePhase(
                 }
         )
         Spacer(Modifier.height(16.dp))
-        Text("Cleaned! 🎉", style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.common_cleaned_done), style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(6.dp))
         Text(
-            "You just freed ${humanBytes(sessionSaved)}",
+            stringResource(R.string.common_freed_now, humanBytes(sessionSaved)),
             style = MaterialTheme.typography.titleMedium,
             color = cs.onSurfaceVariant
         )
         Text(
-            "🌿 Cura has saved you ${humanBytes(allTimeSaved)} all-time",
+            stringResource(R.string.common_freed_all, humanBytes(allTimeSaved)),
             style = MaterialTheme.typography.bodyMedium,
             color = cs.tertiary,
             fontWeight = FontWeight.SemiBold
@@ -655,10 +657,10 @@ private fun SuggestDonePhase(
             onClick = onDealMore,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = MaterialTheme.shapes.large
-        ) { Text("Give me 10 more ↻", fontWeight = FontWeight.Bold) }
+        ) { Text(stringResource(R.string.sug_more), fontWeight = FontWeight.Bold) }
         TextButton(
             onClick = onBack,
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Back home") }
+        ) { Text(stringResource(R.string.common_back_home)) }
     }
 }

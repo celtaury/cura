@@ -55,6 +55,7 @@ import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.isPartialMediaAccess
 import com.celtaury.cura.core.mediaPermissions
 import com.celtaury.cura.ui.theme.InterBlack
+import androidx.compose.ui.res.stringResource
 
 /**
  * Settings, UX v2 (v1 scope): theme, permissions, trash helper.
@@ -93,14 +94,14 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Settings", fontWeight = FontWeight.Bold, fontFamily = InterBlack)
-                        Text("Small dials, big comfort", fontSize = 12.sp,
+                        Text(stringResource(R.string.set_title), fontWeight = FontWeight.Bold, fontFamily = InterBlack)
+                        Text(stringResource(R.string.set_subtitle), fontSize = 12.sp,
                             color = cs.onSurfaceVariant)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -146,12 +147,11 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 Text(
                     when {
                         mediaOk && !partialMedia ->
-                            "✅ Photo access granted — Cura can see your media."
+                            stringResource(R.string.set_media_ok)
                         mediaOk ->
-                            "🟡 Cura sees only the photos you picked. Allow all " +
-                                "so nothing gets missed."
+                            stringResource(R.string.set_media_partial)
                         else ->
-                            "⚠️ Photo access is off — Cura can't see anything yet."
+                            stringResource(R.string.set_media_off)
                     },
                     fontSize = 13.sp
                 )
@@ -161,7 +161,7 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                         onClick = { permLauncher.launch(mediaPermissions()) },
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = MaterialTheme.shapes.large
-                    ) { Text("Allow all photos") }
+                    ) { Text(stringResource(R.string.set_allow_all)) }
                     Spacer(Modifier.height(6.dp))
                 }
                 Button(
@@ -174,31 +174,28 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                 )
                             )
                         }.onFailure {
-                            Toast.makeText(context, "Couldn't open settings", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.set_open_failed), Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = MaterialTheme.shapes.large
-                ) { Text("Open Android app settings") }
+                ) { Text(stringResource(R.string.set_open_android)) }
             }
 
             // ── Deletion style (Batch C): the confidence dial ──
-            SectionCard(title = "Deletion style") {
+            SectionCard(title = stringResource(R.string.set_deletion_style)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "Instant delete",
+                            stringResource(R.string.set_instant_title),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            "Skip Cura's “are you sure?” sheet — one tap and " +
-                                "it's out of sight. Android may still ask on its " +
-                                "own dialog, and everything stays recoverable in " +
-                                "Trash & recovery for ~30 days.",
+                            stringResource(R.string.set_instant_body),
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant
                         )
@@ -212,13 +209,9 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             }
 
             // ── Trash & recovery (elderly-friendly, UX v2 decision 27) ──
-            SectionCard(title = "Deleted something by accident?") {
+            SectionCard(title = stringResource(R.string.set_accident)) {
                 Text(
-                    "Cura never destroys instantly. Cleaned files rest in your " +
-                        "phone's Trash for about 30 days:\n\n" +
-                        "1. Open your Files app\n" +
-                        "2. Tap Library or Menu\n" +
-                        "3. Tap Trash — restore what you miss",
+                    stringResource(R.string.set_trash_teach),
                     fontSize = 13.sp
                 )
                 Spacer(Modifier.height(10.dp))
@@ -226,7 +219,9 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                     onClick = { onNavigate("trash") },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = MaterialTheme.shapes.large
-                ) { Text("Show what's in the trash") }
+                ) { Text(stringResource(R.string.set_show_trash)) }
+                // D1 hotfix: resolved at composition — used inside onClick below
+                val filesHint = stringResource(R.string.common_files_hint)
                 TextButton(
                     onClick = {
                         val ok = runCatching {
@@ -237,27 +232,25 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                         if (!ok) {
                             Toast.makeText(
                                 context,
-                                "Open your Files app, then look for “Trash”",
+                                filesHint,
                                 Toast.LENGTH_LONG
                             ).show()
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("Or open the Files app instead") }
+                ) { Text(stringResource(R.string.set_open_files_instead)) }
             }
 
             // ── Support (Batch B — transparent earning: no ads, no data selling) ──
-            SectionCard(title = "Support Cura 💚") {
+            SectionCard(title = stringResource(R.string.set_support)) {
                 Text(
-                    "Cura is free, shows no ads, and never sells your data. " +
-                        "If it saved you space — and a little stress — a small " +
-                        "donation keeps it that way.",
+                    stringResource(R.string.set_support_body),
                     fontSize = 13.sp
                 )
                 Spacer(Modifier.height(10.dp))
                 if (CuraLinks.DONATION_URL.isBlank()) {
                     Text(
-                        "Donation link coming soon — nothing to tap yet 🙂",
+                        stringResource(R.string.set_donation_soon),
                         fontSize = 12.sp,
                         color = cs.onSurfaceVariant
                     )
@@ -269,23 +262,23 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                     Intent(Intent.ACTION_VIEW, Uri.parse(CuraLinks.DONATION_URL))
                                 )
                             }.onFailure {
-                                Toast.makeText(context, "Couldn't open the link", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.set_link_failed), Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         shape = MaterialTheme.shapes.large
-                    ) { Text("Support the project") }
+                    ) { Text(stringResource(R.string.set_support_btn)) }
                 }
             }
 
             // ── Your data ──
-            MenuRow(title = "Your impact 🌿", subtitle = "Saved space, sessions, storage") {
+            MenuRow(title = stringResource(R.string.set_impact), subtitle = stringResource(R.string.set_impact_sub)) {
                 onNavigate("more")
             }
 
             Spacer(Modifier.height(20.dp))
             Text(
-                "CURA v${BuildConfig.VERSION_NAME} · flow build — storage care, not storage stress.",
+                stringResource(R.string.set_footer, BuildConfig.VERSION_NAME),
                 fontSize = 12.sp,
                 color = cs.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 8.dp)

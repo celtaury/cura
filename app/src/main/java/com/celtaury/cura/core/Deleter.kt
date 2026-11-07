@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.celtaury.cura.R
 
 /**
  * Shared delete flow. Android 11+ uses the system delete dialog (Play-ready);
@@ -107,7 +108,7 @@ fun rememberDeleteController(
             launcher.launch(IntentSenderRequest.Builder(sender).build())
         }.onFailure { e ->
             Log.e(TAG, "Couldn't launch the system dialog", e)
-            ladder.stop("Couldn't start the system delete dialog: ${firstReason(e)}")
+            ladder.stop(context.getString(R.string.del_dialog_failed, firstReason(e)))
         }
     }
 
@@ -140,7 +141,7 @@ fun rememberDeleteController(
                     } else {
                         Toast.makeText(
                             context,
-                            "This Android version blocked the delete 🥲",
+                            context.getString(R.string.del_blocked),
                             Toast.LENGTH_LONG
                         ).show()
                         onCancelled()
@@ -261,7 +262,7 @@ private class SystemDeleteLadder(
         } else {
             Toast.makeText(
                 context,
-                reason ?: "Couldn't start the system delete dialog",
+                reason ?: context.getString(R.string.del_dialog_failed_short),
                 Toast.LENGTH_LONG
             ).show()
             onCancelled?.invoke()
@@ -350,7 +351,7 @@ private class SystemDeleteLadder(
             if (deniedUris.isNotEmpty() && dialogsShown == 0) {
                 Toast.makeText(
                     context,
-                    "Android refused to delete these files 🥲",
+                    context.getString(R.string.del_refused),
                     Toast.LENGTH_LONG
                 ).show()
             }

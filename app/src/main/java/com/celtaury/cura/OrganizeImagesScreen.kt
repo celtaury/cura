@@ -68,12 +68,14 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 
 @Composable
 fun OrganizeImagesScreen(onBack: () -> Unit) {
     PermissionGate(
-        title = "Organize Images",
-        description = "Your gallery, grouped by month. Pick photos and tidy them into their own Cura folders."
+        title = stringResource(R.string.org_title),
+        description = stringResource(R.string.org_desc)
     ) {
         OrganizeImagesContent(onBack)
     }
@@ -120,7 +122,8 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
                 n
             }
             moving = false
-            Toast.makeText(context, "Moved $moved photos 📂", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context,
+            context.resources.getQuantityString(R.plurals.org_moved_n, moved, moved), Toast.LENGTH_SHORT).show()
             rescan()
         }
     }
@@ -141,7 +144,7 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
             pendingAfterWrite = { ok ->
                 if (ok) performMove(items) else {
                     moving = false
-                    Toast.makeText(context, "Permission needed to move photos",
+                    Toast.makeText(context, context.getString(R.string.org_perm),
                         Toast.LENGTH_SHORT).show()
                 }
             }
@@ -153,10 +156,10 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
             }.onFailure {
                 moving = false
                 pendingAfterWrite = null
-                Toast.makeText(context, "Couldn't start the move", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.org_failed), Toast.LENGTH_SHORT).show()
             }
         } else {
-            Toast.makeText(context, "Moving photos needs Android 11+", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.org_needs_r), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -169,14 +172,14 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Organize Images", fontWeight = FontWeight.Bold)
-                        Text("Tap a photo to select it", fontSize = 12.sp,
+                        Text(stringResource(R.string.org_title), fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.org_hint), fontSize = 12.sp,
                             color = cs.onSurfaceVariant)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -195,9 +198,9 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("${selectedUris.size} photos selected",
+                            Text(pluralStringResource(R.plurals.org_selected_n, selectedUris.size, selectedUris.size),
                                 fontWeight = FontWeight.SemiBold)
-                            Text("Moves into Pictures/Cura/<month>",
+                            Text(stringResource(R.string.org_dest),
                                 fontSize = 12.sp, color = cs.onSurfaceVariant)
                         }
                         Button(
@@ -211,7 +214,7 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
                                     color = cs.onPrimary,
                                     strokeWidth = 2.dp
                                 )
-                            } else Text("Move 📂")
+                            } else Text(stringResource(R.string.org_move))
                         }
                     }
                 }
@@ -226,7 +229,7 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
             ) {
                 CircularProgressIndicator(color = cs.primary)
                 Spacer(Modifier.height(12.dp))
-                Text("Grouping your gallery…", color = cs.onSurfaceVariant)
+                Text(stringResource(R.string.org_grouping), color = cs.onSurfaceVariant)
             }
         } else if (months.isEmpty()) {
             Column(
@@ -235,7 +238,7 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
                 verticalArrangement = Arrangement.Center
             ) {
                 Text("🖼️", fontSize = 48.sp)
-                Text("No photos found", color = cs.onSurfaceVariant)
+                Text(stringResource(R.string.org_empty), color = cs.onSurfaceVariant)
             }
         } else {
             LazyColumn(
@@ -254,12 +257,12 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(label, fontWeight = FontWeight.Bold)
                                 Text(
-                                    "${items.size} photos · ${humanBytes(items.sumOf { it.sizeBytes })}",
+                                    pluralStringResource(R.plurals.org_month_n, items.size, items.size, humanBytes(items.sumOf { it.sizeBytes })),
                                     fontSize = 12.sp, color = cs.onSurfaceVariant
                                 )
                             }
                             Text(
-                                "Select all",
+                                stringResource(R.string.common_select_all),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = cs.primary,

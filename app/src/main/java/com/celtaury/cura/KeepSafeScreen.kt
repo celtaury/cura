@@ -74,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.celtaury.cura.core.CuraStrings
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.humanBytes
@@ -83,6 +84,27 @@ import com.celtaury.cura.ui.theme.InterBlack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+
+/** Filter chip labels — the state keys stay English, only the label translates. */
+private fun filterLabelRes(key: String): Int = when (key) {
+    "All Sources" -> R.string.ks_filter_all
+    "Manual" -> R.string.src_manual
+    "Quick Clean" -> R.string.dash_quick_clean
+    "WhatsApp" -> R.string.src_whatsapp
+    "Suggestions" -> R.string.src_suggestions
+    "Browse Gallery" -> R.string.dash_open_browse
+    "Gallery" -> R.string.src_gallery
+    else -> R.string.ks_filter_all
+}
+
+private fun timeLabelRes(key: String): Int = when (key) {
+    "All Time" -> R.string.ks_ft_all
+    "Last 7 Days" -> R.string.ks_ft_7
+    "Last 30 Days" -> R.string.ks_ft_30
+    else -> R.string.ks_ft_all
+}
 
 private data class ProtectedEntry(
     val uri: Uri,
@@ -181,12 +203,12 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                 title = {
                     Column {
                         Text(
-                            "Keep-safe",
+                            stringResource(R.string.ks_title),
                             fontWeight = FontWeight.Bold,
                             fontFamily = InterBlack
                         )
                         Text(
-                            "Protected from every cleaner",
+                            stringResource(R.string.ks_subtitle),
                             fontSize = 12.sp,
                             color = cs.onSurfaceVariant
                         )
@@ -194,7 +216,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -217,7 +239,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        "Loading protected files…",
+                        stringResource(R.string.ks_loading),
                         color = cs.onSurfaceVariant
                     )
                 }
@@ -246,13 +268,13 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(18.dp))
                     Text(
-                        "Nothing protected yet",
+                        stringResource(R.string.ks_empty),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Swipe right on any card in Quick Clean, Social Cleaner, or review decks to keep it safe forever.",
+                        stringResource(R.string.ks_empty_body),
                         color = cs.onSurfaceVariant,
                         fontSize = 13.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -262,7 +284,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                         onClick = onBack,
                         shape = CircleShape
                     ) {
-                        Text("Back home")
+                        Text(stringResource(R.string.common_back_home))
                     }
                 }
             } else {
@@ -304,13 +326,13 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    "${entries.size} protected files",
+                                    pluralStringResource(R.plurals.ks_files_n, entries.size, entries.size),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 16.sp,
                                     color = cs.onSurface
                                 )
                                 Text(
-                                    "${humanBytes(totalBytes)} safely shielded from cleaning",
+                                    stringResource(R.string.ks_shielded, humanBytes(totalBytes)),
                                     fontSize = 12.sp,
                                     color = cs.onSurfaceVariant
                                 )
@@ -330,7 +352,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                             FilterChip(
                                 selected = selectedSourceFilter == source,
                                 onClick = { selectedSourceFilter = source },
-                                label = { Text(source) },
+                                label = { Text(stringResource(filterLabelRes(source))) },
                                 shape = CircleShape,
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = cs.primaryContainer,
@@ -343,7 +365,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                             FilterChip(
                                 selected = selectedTimeFilter == time,
                                 onClick = { selectedTimeFilter = time },
-                                label = { Text(time) },
+                                label = { Text(stringResource(timeLabelRes(time))) },
                                 shape = CircleShape,
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = cs.secondaryContainer,
@@ -367,7 +389,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                             Text("🔍", fontSize = 38.sp)
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "No files match these filters",
+                                stringResource(R.string.ks_no_match),
                                 fontWeight = FontWeight.Bold,
                                 color = cs.onSurface
                             )
@@ -379,7 +401,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                                 },
                                 shape = CircleShape
                             ) {
-                                Text("Reset Filters")
+                                Text(stringResource(R.string.ks_reset))
                             }
                         }
                     } else {
@@ -495,21 +517,21 @@ fun KeepSafeScreen(onBack: () -> Unit) {
 
                                                 scope.launch {
                                                     val result = snackbarHostState.showSnackbar(
-                                                        message = "Unprotected \"${removed.name}\"",
+                                                        message = context.getString(R.string.ks_unprotected_name, removed.name),
                                                         actionLabel = "Undo",
                                                         duration = SnackbarDuration.Short
                                                     )
                                                     if (result == SnackbarResult.ActionPerformed) {
                                                         KeepSafe.add(context, removed.uri, removed.source)
                                                         entries = (entries + removed).sortedByDescending { it.savedTimestamp }
-                                                        Toast.makeText(context, "Protection restored 🛡️", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, context.getString(R.string.ks_restored), Toast.LENGTH_SHORT).show()
                                                     }
                                                 }
                                             }
                                         ) {
                                             Icon(
                                                 Icons.Default.RemoveCircleOutline,
-                                                contentDescription = "Remove protection",
+                                                contentDescription = stringResource(R.string.ks_remove_cd),
                                                 tint = cs.error.copy(alpha = 0.8f)
                                             )
                                         }
@@ -535,7 +557,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                     KeepSafe.remove(context, target.uri)
                     entries = entries.filterNot { it.uri == target.uri }
                     previewItem = null
-                    Toast.makeText(context, "Unprotected 🛡️", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.ks_unprotected), Toast.LENGTH_SHORT).show()
                 }
             },
             onKeepSafe = {
@@ -587,7 +609,7 @@ private fun resolveEntry(context: Context, uri: Uri): ProtectedEntry? {
 
                 ProtectedEntry(
                     uri = uri,
-                    name = c.getString(nameIdx) ?: uri.lastPathSegment ?: "Protected file",
+                    name = c.getString(nameIdx) ?: uri.lastPathSegment ?: CuraStrings.s(R.string.ks_fallback_name),
                     sizeBytes = c.getLong(sizeIdx),
                     dateAddedSec = c.getLong(dateIdx),
                     mime = c.getString(mimeIdx) ?: "",
@@ -603,7 +625,7 @@ private fun resolveEntry(context: Context, uri: Uri): ProtectedEntry? {
 }
 
 private fun fallbackEntry(uri: Uri, metaSource: String?, savedTime: Long): ProtectedEntry {
-    val name = uri.lastPathSegment ?: "Protected file"
+    val name = uri.lastPathSegment ?: CuraStrings.s(R.string.ks_fallback_name)
     val source = if (!metaSource.isNullOrBlank()) metaSource else "Gallery"
     return ProtectedEntry(
         uri = uri,

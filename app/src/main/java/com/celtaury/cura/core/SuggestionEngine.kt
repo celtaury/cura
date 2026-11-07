@@ -3,6 +3,7 @@ package com.celtaury.cura.core
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.celtaury.cura.R
 
 /**
  * Batch 4 — the brain behind the dashboard leaf tile.
@@ -76,10 +77,10 @@ object SuggestionEngine {
 
         val families = listOfNotNull(
             if (shots.isNotEmpty()) {
-                Family("deck_shots", "Old Screenshots", shots, 3 + (affinity["shots"] ?: 0))
+                Family("deck_shots", context.getString(R.string.family_shots), shots, 3 + (affinity["shots"] ?: 0))
             } else null,
             if (olds.isNotEmpty()) {
-                Family("deck_oldmedia", "Old Media", olds, 2 + (affinity["old"] ?: 0))
+                Family("deck_oldmedia", context.getString(R.string.family_oldmedia), olds, 2 + (affinity["old"] ?: 0))
             } else null
         ).filter { it.score > 0 }
 
@@ -89,7 +90,7 @@ object SuggestionEngine {
                 val shown = best.items.random()
                 Pick(
                     item = shown,
-                    reason = reasonFor(shown),
+                    reason = reasonFor(context, shown),
                     deckRoute = best.route,
                     familyTitle = best.title,
                     familyCount = best.items.size,
@@ -98,9 +99,9 @@ object SuggestionEngine {
             }
             forgotten != null -> Pick(
                 item = forgotten,
-                reason = "Abandoned photo",
+                reason = context.getString(R.string.family_abandoned_reason),
                 deckRoute = "",
-                familyTitle = "Abandoned Photo Found!",
+                familyTitle = context.getString(R.string.family_abandoned),
                 familyCount = 1,
                 familyBytes = forgotten.sizeBytes
             )
@@ -137,6 +138,6 @@ object SuggestionEngine {
         }
     }
 
-    private fun reasonFor(item: MediaItem): String =
-        "Added ${relativeDays(item.dateAddedSec)}"
+    private fun reasonFor(context: Context, item: MediaItem): String =
+        context.getString(R.string.family_added, relativeDays(item.dateAddedSec))
 }

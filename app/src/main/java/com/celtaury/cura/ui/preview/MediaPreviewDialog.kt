@@ -71,6 +71,8 @@ import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import kotlin.math.abs
 import kotlinx.coroutines.launch
+import androidx.compose.ui.res.stringResource
+import com.celtaury.cura.R
 
 /** Which action the current preview drag is armed for.
  *  Prefixed (Preview…) — K2 flags same-name top-level types across files, even private. */
@@ -221,7 +223,7 @@ fun MediaPreviewDialog(
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                "${humanBytes(item.sizeBytes)} · added ${relativeDays(item.dateAddedSec)}",
+                                stringResource(R.string.common_item_meta, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec)),
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 12.sp
                             )
@@ -229,7 +231,7 @@ fun MediaPreviewDialog(
 
                         if (isQueued) {
                             Text(
-                                "Queued ✓",
+                                stringResource(R.string.prev_queued_short),
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -249,7 +251,7 @@ fun MediaPreviewDialog(
                         ) {
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "Close preview",
+                                contentDescription = stringResource(R.string.prev_close_cd),
                                 tint = Color.White
                             )
                         }
@@ -430,10 +432,10 @@ fun MediaPreviewDialog(
                                 PreviewDragTarget.Queue ->
                                     // `to` at END of line: K2 rejects a leading infix
                                     // operator ("Function invocation 'to(...)' expected")
-                                    (if (isQueued) "Release · remove from queue" else "Release · queue delete") to
+                                    (if (isQueued) stringResource(R.string.prev_release_unqueue) else stringResource(R.string.prev_release_queue)) to
                                         MaterialTheme.colorScheme.error
-                                PreviewDragTarget.Keep -> "Release · keep safe" to Color(0xFF388E3C)
-                                PreviewDragTarget.Close -> "Release · close" to Color(0xFF444444)
+                                PreviewDragTarget.Keep -> stringResource(R.string.prev_release_keep) to Color(0xFF388E3C)
+                                PreviewDragTarget.Close -> stringResource(R.string.prev_release_close) to Color(0xFF444444)
                                 PreviewDragTarget.None -> "" to Color.Transparent
                             }
                             Text(
@@ -459,7 +461,7 @@ fun MediaPreviewDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         PreviewGestureChip(
-                            label = if (isQueued) "✓ Queued · tap to undo" else "← Queue delete",
+                            label = if (isQueued) stringResource(R.string.prev_queued_badge) else stringResource(R.string.prev_queue_delete),
                             active = dragTarget == PreviewDragTarget.Queue,
                             activeColor = MaterialTheme.colorScheme.error,
                             onClick = {
@@ -468,13 +470,13 @@ fun MediaPreviewDialog(
                             }
                         )
                         PreviewGestureChip(
-                            label = "↓ Close",
+                            label = stringResource(R.string.prev_close),
                             active = dragTarget == PreviewDragTarget.Close,
                             activeColor = Color(0xFF666666),
                             onClick = onDismiss
                         )
                         PreviewGestureChip(
-                            label = "Keep safe →",
+                            label = stringResource(R.string.prev_keep),
                             active = dragTarget == PreviewDragTarget.Keep,
                             activeColor = Color(0xFF388E3C),
                             onClick = {
