@@ -2,6 +2,8 @@
 
 # Cura
 
+![Cura Banner](images/Frame-2106667157.png)
+
 **The phone cleaner that can't phone home** :3
 
 No ads · No tracking · No INTERNET permission
