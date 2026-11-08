@@ -13,10 +13,12 @@ import com.celtaury.cura.R
  * months ago"), never by a category. Categories stay in Quick Clean; this
  * screen is the friendly nudge, not the janitor.
  *
- * Ranking: empty files & duplicates argue for themselves, then dusty
- * screenshots, forgotten installers, old media. A family contributes at most
- * [MAX_PER_FAMILY] cards so the deck feels varied. "Not today" skips sink a
- * card by one point per skip; judged files never return (SuggestPrefs).
+ * Ranking: empty files & duplicates argue for themselves, then the Batch E
+ * photo-mind verdicts (burst extras, blurry shots, plain screenshots,
+ * scanned documents), then dusty screenshots, forgotten installers, old
+ * media. A family contributes at most [MAX_PER_FAMILY] cards so the deck
+ * feels varied. "Not today" skips sink a card by one point per skip;
+ * judged files never return (SuggestPrefs).
  *
  * Tile handoff: the dashboard seeds [Session] with the exact item it showed —
  * the deck then opens ON that card, so the tile finally tells the truth.
@@ -28,7 +30,7 @@ object SuggestEngine {
 
     data class Suggestion(
         val item: MediaItem,
-        val tag: String,      // "Old screenshot" · "Empty file" · "Duplicate" · "Stray installer" · "Old photo"
+        val tag: String,      // "Old screenshot" · "Empty file" · "Duplicate" · "Stray installer" · "Old photo" · v2: "Burst extra" · "Blurry photo" · "Plain screenshot" · "Scanned document"
         val reason: String,   // the line that leads the card
         val score: Int
     )
@@ -57,6 +59,14 @@ object SuggestEngine {
             )
         "Duplicate" ->
             context.getString(R.string.eng_duplicate)
+        "Burst extra" ->
+            context.getString(R.string.eng_burst_extra)
+        "Blurry photo" ->
+            context.getString(R.string.eng_blurry)
+        "Plain screenshot" ->
+            context.getString(R.string.eng_boring)
+        "Scanned document" ->
+            context.getString(R.string.eng_doc)
         "Old screenshot" ->
             context.getString(R.string.eng_dusty, relativeDays(item.dateAddedSec))
         "Stray installer" ->
@@ -99,11 +109,28 @@ object SuggestEngine {
         Scanner.duplicateImages(context).filter(::viable).forEach {
             pool += Suggestion(it, "Duplicate", reasonFor(context, it, "Duplicate"), 5)
         }
+        // Batch E — the photo mind's four verdicts. Insertion order matters:
+        // the pool is sorted by score with a STABLE sort, so equal-score ties
+        // resolve to whichever family was added first. "Plain screenshot" is
+        // added before "Old screenshot" for exactly that reason.
+        val mind = PhotoMind.scan(context)
+        mind.burstExtras.filter(::viable).forEach {
+            pool += Suggestion(it, "Burst extra", reasonFor(context, it, "Burst extra"), 5)
+        }
+        mind.blurry.filter(::viable).forEach {
+            pool += Suggestion(it, "Blurry photo", reasonFor(context, it, "Blurry photo"), 5)
+        }
+        mind.boringShots.filter(::viable).forEach {
+            pool += Suggestion(it, "Plain screenshot", reasonFor(context, it, "Plain screenshot"), 4)
+        }
         Scanner.oldScreenshots(context, minAgeDays = 30).filter(::viable).forEach {
             pool += Suggestion(it, "Old screenshot", reasonFor(context, it, "Old screenshot"), 4)
         }
         Scanner.apkFiles(context).filter(::viable).forEach {
             pool += Suggestion(it, "Stray installer", reasonFor(context, it, "Stray installer"), 4)
+        }
+        mind.documents.filter(::viable).forEach {
+            pool += Suggestion(it, "Scanned document", reasonFor(context, it, "Scanned document"), 3)
         }
         Scanner.oldMedia(context, minAgeDays = 60).filter(::viable).forEach {
             pool += Suggestion(it, "Old photo", reasonFor(context, it, "Old photo"), 3)

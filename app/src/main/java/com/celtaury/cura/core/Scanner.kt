@@ -128,6 +128,21 @@ object Scanner {
             item.displayName.endsWith(".mkv", true) ||
             item.displayName.endsWith(".webm", true)
 
+    /**
+     * Public predicate: does this item live in a screenshots / screen-recording
+     * bucket? Single source of truth for every screen — the deck's family
+     * router, old-media exclusion and the photo mind all must agree. (Was
+     * three private copies; one of them compared a lowercased path against
+     * "screenRecorder" and could never match — fixed here.)
+     */
+    fun isScreenshotLike(item: MediaItem): Boolean {
+        val p = item.path.lowercase()
+        val n = item.displayName.lowercase()
+        return p.contains("screenshot") || n.startsWith("screenshot") ||
+            n.startsWith("screen-") || n.startsWith("screen_recording") ||
+            p.contains("screenrecorder")
+    }
+
     private fun isImage(item: MediaItem) =
         item.mime.startsWith("image/") ||
             item.displayName.endsWith(".jpg", true) ||
@@ -166,11 +181,7 @@ object Scanner {
                 args = arrayOf(cutoff.toString()),
                 order = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
             ).filter {
-                val p = it.path.lowercase()
-                val n = it.displayName.lowercase()
-                p.contains("screenshot") || n.startsWith("screenshot") ||
-                    p.contains("screenRecorder") || n.startsWith("screen_recording") ||
-                    n.startsWith("screen-")
+                isScreenshotLike(it)
             }.filter { !isProtected(context, it) }
         }
 
@@ -224,9 +235,7 @@ object Scanner {
             }
             all.filter {
                 val p = it.path.lowercase()
-                val n = it.displayName.lowercase()
-                val isShot = p.contains("screenshot") || n.startsWith("screenshot") ||
-                    n.startsWith("screen-") || p.contains("screenRecorder")
+                val isShot = isScreenshotLike(it)
                 val isSocial = p.contains("whatsapp") || p.contains("telegram") ||
                     p.contains("instagram")
                 !isShot && !isSocial
@@ -306,6 +315,22 @@ object Scanner {
                 byHash.getOrPut(h) { mutableListOf() }.add(item)
             }
             byHash.values.filter { it.size > 1 }.flatten().filter { !isProtected(context, it) }
+        }
+
+    /**
+     * Batch E — full image inventory for the photo mind: every non-empty
+     * image, oldest first, keep-safe items already excluded. Chat-app media
+     * stays in (the Social Cleaner owns those folders) so callers must apply
+     * their own ownership rules — the mind skips them before decoding.
+     */
+    suspend fun imageInventory(context: Context): List<MediaItem> =
+        withContext(Dispatchers.IO) {
+            query(
+                context,
+                mediaUri("images"),
+                selection = "${MediaStore.MediaColumns.SIZE} > 0",
+                order = "${MediaStore.MediaColumns.DATE_ADDED} ASC"
+            ).filter { !isProtected(context, it) }
         }
 
     /** One old, forgotten photo for the dashboard discovery card. */

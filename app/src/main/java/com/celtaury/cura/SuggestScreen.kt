@@ -1,6 +1,7 @@
 package com.celtaury.cura
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -88,6 +89,25 @@ import androidx.compose.ui.res.stringResource
  */
 private const val DECK_ID = "suggest"
 
+/**
+ * Chip labels for the deck's internal tag keys — localized (v2: the chip
+ * finally speaks the user's language instead of raw English keys).
+ * 0 = unknown tag (forward compatibility) → the raw key is shown as-is.
+ */
+@StringRes
+private fun tagLabelRes(tag: String): Int = when (tag) {
+    "Old screenshot" -> R.string.tag_old_screenshot
+    "Empty file" -> R.string.tag_empty_file
+    "Duplicate" -> R.string.tag_duplicate
+    "Stray installer" -> R.string.tag_stray_installer
+    "Old photo" -> R.string.tag_old_photo
+    "Burst extra" -> R.string.tag_burst_extra
+    "Blurry photo" -> R.string.tag_blurry_photo
+    "Plain screenshot" -> R.string.tag_plain_screenshot
+    "Scanned document" -> R.string.tag_scanned_document
+    else -> 0
+}
+
 @Composable
 fun SuggestScreen(onBack: () -> Unit) {
     PermissionGate(
@@ -118,6 +138,9 @@ private fun SuggestContent(onBack: () -> Unit) {
 
     // ── load: restore the resting session, else deal a fresh one ──
     LaunchedEffect(Unit) {
+        // v2 one-shot: a pre-update resting session would keep dealing the
+        // old ten cards and mask the new photo-mind families — clear it once.
+        SuggestPrefs.ensureEngineFresh(context, 2)
         val seed = SuggestEngine.Session.consume()
         val saved = SuggestPrefs.savedCards(context)
         var restored: List<SuggestEngine.Suggestion> = emptyList()
@@ -479,6 +502,8 @@ private fun DeckPhase(
 
         // ── the reason banner: leads with WHY, not WHAT ──
         current?.let { s ->
+            val chipLabel = tagLabelRes(s.tag).takeIf { it != 0 }
+                ?.let { stringResource(it) } ?: s.tag
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -486,7 +511,7 @@ private fun DeckPhase(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    s.tag.uppercase(),
+                    chipLabel.uppercase(),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Black,
                     color = cs.onPrimaryContainer,

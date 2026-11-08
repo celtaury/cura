@@ -91,4 +91,21 @@ object SuggestPrefs {
     fun clearSession(context: Context) {
         prefs(context).edit().remove("cards").apply()
     }
+
+    /**
+     * One-time engine bump. When the suggestion engine gains new families
+     * (v2 = the photo mind), a resting pre-update session would hide them —
+     * the deck would keep dealing the old ten cards and the update would look
+     * like it did nothing. Clearing the resting session once makes the first
+     * post-update deal fresh. Judged files and skip counts are kept.
+     */
+    fun ensureEngineFresh(context: Context, engine: Int): Boolean {
+        val prefs = prefs(context)
+        return if (prefs.getInt("engine", 0) < engine) {
+            prefs.edit().putInt("engine", engine).remove("cards").apply()
+            true
+        } else {
+            false
+        }
+    }
 }

@@ -88,6 +88,7 @@ import com.celtaury.cura.core.DeleteQueuePrefs
 import com.celtaury.cura.core.JunkCategory
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
+import com.celtaury.cura.core.PhotoMind
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.SuggestionEngine
@@ -146,6 +147,25 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             val apks = Scanner.apkFiles(context)
             if (apks.isNotEmpty()) {
                 found += JunkCategory("apks", context.getString(R.string.qq_cat_apks), context.getString(R.string.qq_cat_apks_sub), apks)
+            }
+
+            // ── Batch E: the photo mind — burst / blurry / boring / docs ──
+            // Slotted BEFORE old screenshots: the sharper reason wins the
+            // first-claim dedupe below, so a mostly-blank screenshot lands in
+            // "Boring" and "Old screenshots" keeps the genuinely interesting rest.
+            scanStatus = context.getString(R.string.qq_scan_mind)
+            val mind = PhotoMind.scan(context)
+            if (mind.burstExtras.isNotEmpty()) {
+                found += JunkCategory("burst", context.getString(R.string.qq_cat_burst), context.getString(R.string.qq_cat_burst_sub), mind.burstExtras)
+            }
+            if (mind.blurry.isNotEmpty()) {
+                found += JunkCategory("blur", context.getString(R.string.qq_cat_blur), context.getString(R.string.qq_cat_blur_sub), mind.blurry)
+            }
+            if (mind.boringShots.isNotEmpty()) {
+                found += JunkCategory("boring", context.getString(R.string.qq_cat_boring), context.getString(R.string.qq_cat_boring_sub), mind.boringShots)
+            }
+            if (mind.documents.isNotEmpty()) {
+                found += JunkCategory("docs", context.getString(R.string.qq_cat_docs), context.getString(R.string.qq_cat_docs_sub), mind.documents)
             }
 
             scanStatus = context.getString(R.string.qq_scan_shots)
@@ -277,7 +297,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 title = {
                     Column {
                         Text(
-                            "Quick Clean",
+                            stringResource(R.string.qq_title),
                             fontWeight = FontWeight.Bold,
                             fontFamily = InterBlack
                         )
