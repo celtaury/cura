@@ -245,26 +245,36 @@ private fun SuggestContent(onBack: () -> Unit) {
     // Summary "Confirm & Clean" routes through the same in-app confirm sheet
     // as every other flow — thumbnails + size before the system dialog.
     val confirmDelete = rememberConfirmableDelete(
-        onCleaned = {
-            val bytes = queue.sumOf { it.sizeBytes }
+        onCleaned = { cleaned ->
+            // Only what Android actually deleted is credited and released;
+            // denied items stay queued (and buried) for another confirm.
+            val grantedUris = cleaned.map { it.uri }.toSet()
+            val bytes = cleaned.sumOf { it.sizeBytes }
             SavedStats.addClean(context, bytes)
             sessionSaved += bytes
-            DeckPrefs.clear(context, DECK_ID)
-            SuggestPrefs.clearSession(context)
-            phase = "done"
+            queue = queue.filterNot { it.uri in grantedUris }
+            if (queue.isEmpty()) {
+                DeckPrefs.clear(context, DECK_ID)
+                SuggestPrefs.clearSession(context)
+                phase = "done"
+            } else {
+                persist()
+                phase = "summary"
+            }
         },
         onCancelled = { unbury(queue) }   // sheet or system dialog dismissed — retryable
     )
 
     val purge = rememberConfirmableDelete(
-        onCleaned = {
-            val bytes = queue.sumOf { it.sizeBytes }
-            val count = queue.size
+        onCleaned = { cleaned ->
+            val grantedUris = cleaned.map { it.uri }.toSet()
+            val bytes = cleaned.sumOf { it.sizeBytes }
+            val count = cleaned.size
             SavedStats.addClean(context, bytes)
             sessionSaved += bytes
-            queue = emptyList()
+            queue = queue.filterNot { it.uri in grantedUris }
             history = emptyList()
-            DeckPrefs.setQueue(context, DECK_ID, emptyList())
+            DeckPrefs.setQueue(context, DECK_ID, queue.map { it.uri.toString() })
             scope.launch {
                 snack.showSnackbar(
                     context.resources.getQuantityString(R.plurals.common_purged_n, count, count, humanBytes(bytes))

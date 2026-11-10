@@ -13,7 +13,19 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- Pre-Android-11 deletes (API 26-29): the direct-fallback path in
+         Deleter.trashOrDelete() writes other apps' MediaStore rows, which a
+         READ-only app cannot do. WRITE is install-time-granted below Q and
+         requested at runtime below R (see PermissionGate.mediaPermissions).
+         It stops existing on R+, where createDeleteRequest takes over. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+
+    <!-- Android 10 keeps full legacy storage semantics for apps that opt in,
+         so the same direct delete path works there. Ignored on R+ (the
+         ladder owns deletes there), harmless on 11+ for new installs. -->
     <application
+        android:requestLegacyExternalStorage="true"
         android:name=".CuraApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

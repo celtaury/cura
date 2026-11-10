@@ -378,19 +378,24 @@ private class SystemDeleteLadder(
 /**
  * Best-effort "Undo": from Android 10 on, Cura's deletions land in the system
  * Trash (IS_TRASHED — see [trashOrDelete]), so we flip it back. Returns the
- * number of restored files. Android 9- keeps no trash — nothing to restore.
- * If the platform refuses, callers show the "open Files app → Trash" hint.
+ * URIs that were ACTUALLY restored — a file the platform refuses (already
+ * gone, row recycled, permission pulled) stays out of the list so the caller
+ * can keep its trash-log entry for a retry. Android 9- keeps no trash —
+ * nothing to restore. If the platform refuses, callers show the "open Files
+ * app → Trash" hint.
  */
-suspend fun tryRestoreFromTrash(context: Context, uris: List<Uri>): Int =
+suspend fun tryRestoreFromTrash(context: Context, uris: List<Uri>): List<Uri> =
     withContext(Dispatchers.IO) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return@withContext 0
-        var restored = 0
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return@withContext emptyList()
+        }
+        val restored = mutableListOf<Uri>()
         uris.forEach { u ->
             runCatching {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.IS_TRASHED, 0)
                 }
-                if (context.contentResolver.update(u, values, null, null) > 0) restored++
+                if (context.contentResolver.update(u, values, null, null) > 0) restored.add(u)
             }
         }
         restored

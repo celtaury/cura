@@ -52,7 +52,17 @@ fun mediaPermissions(): Array<String> =
             Manifest.permission.READ_MEDIA_AUDIO
         )
     } else {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        // Below R the delete ladder falls back to direct MediaStore writes
+        // (Deleter.trashOrDelete), which need WRITE on top of READ. The
+        // permission stops existing on R+ (manifest maxSdkVersion=29) —
+        // there createDeleteRequest owns every delete with READ alone.
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q)
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        else
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
 /** True when Cura can read media (full OR the Android-14 partial selection). */

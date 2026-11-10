@@ -355,7 +355,7 @@ object Scanner {
                 mediaUri("images"),
                 selection = "${MediaStore.MediaColumns.SIZE} > 0",
                 order = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
-            )
+            ).filter { !isProtected(context, it) }   // keep-safe stays out of EVERY surface — incl. Organize's month tiles and (future) month delete
             val groups = LinkedHashMap<String, MutableList<MediaItem>>()
             for (item in all) {
                 val key = monthKeyOf(item.dateAddedSec)

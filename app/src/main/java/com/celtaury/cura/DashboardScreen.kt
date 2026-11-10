@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import kotlinx.coroutines.Job
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
@@ -96,6 +97,7 @@ import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.SuggestEngine
 import com.celtaury.cura.core.SuggestionEngine
+import com.celtaury.cura.core.ThemePrefs
 import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.mediaPermissions
@@ -129,10 +131,20 @@ private data class FeatureTile(
 fun DashboardScreen(onNavigate: (String) -> Unit) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
-    val dark = isSystemInDarkTheme()
+    // Effective theme: respect the Settings override — the decorative
+    // gradients must follow the same scheme MaterialTheme uses. Before, this
+    // read the SYSTEM setting directly, so "Dark" in Settings left the top
+    // glow and the Swipe-Up area light-styled on a light phone.
+    val dark = when (ThemePrefs.mode) {
+        ThemePrefs.LIGHT -> false
+        ThemePrefs.DARK -> true
+        else -> isSystemInDarkTheme()
+    }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val orangeContainer = if (dark) AccentOrangeContainerDark else AccentOrangeContainer
+    // Resolved at composition for non-composable callbacks (snackbar labels).
+    val undoLabel = stringResource(R.string.common_btn_undo)
 
     var storageInfo by remember { mutableStateOf<StorageInfo?>(null) }
     var savedBytes by remember { mutableLongStateOf(0L) }
@@ -149,6 +161,8 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
         pickVersion++
     }
 
+    var refreshJob by remember { mutableStateOf<Job?>(null) }
+
     suspend fun refreshAll() {
         savedBytes = SavedStats.savedBytes(context)
         storageInfo = withContext(Dispatchers.IO) { getDeviceStorageInfo(context) }
@@ -162,13 +176,22 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
         }
     }
 
+    // One in-flight refresh: a new request cancels the running one instead of
+    // doubling the scans. ON_RESUME, pickVersion and the grant launcher all
+    // fire on the same dashboard entry — three concurrent full refreshes
+    // (each = 3 MediaStore scans + a PhotoMind pass) caused visible jank.
+    fun refreshNow() {
+        refreshJob?.cancel()
+        refreshJob = scope.launch { refreshAll() }
+    }
+
     // Data sync: refresh when returning to Dashboard
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        scope.launch { refreshAll() }
+        refreshNow()
     }
 
     LaunchedEffect(pickVersion, mediaOk) {
-        refreshAll()
+        refreshNow()
     }
 
     val targetProgress = storageInfo?.percentageUsed ?: 0f
@@ -179,14 +202,15 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
     )
 
     // Confirmable delete with in-app preview before the OS delete dialog
-    val confirmDelete = rememberConfirmableDelete(onCleaned = {
-        sheetItem?.let {
+    val confirmDelete = rememberConfirmableDelete(onCleaned = { cleaned ->
+        // sheetItem is already null by the time this fires (onClean cleared it
+        // to close the sheet), so the deleted candidate arrives as a parameter.
+        cleaned.firstOrNull()?.let {
             SavedStats.addClean(context, it.sizeBytes)
             SuggestionEngine.observe(it, "queued")
         }
-        sheetItem = null
         pickVersion++
-        scope.launch { refreshAll() }
+        refreshNow()
         Toast.makeText(context, context.getString(R.string.dash_cleaned_memory), Toast.LENGTH_SHORT).show()
     })
 
@@ -229,7 +253,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 IconButton(onClick = { onNavigate("settings") }) {
                     Icon(
                         Icons.Default.Settings,
-                        contentDescription = "Settings",
+                        contentDescription = stringResource(R.string.common_settings_cd),
                         tint = cs.onBackground
                     )
                 }
@@ -545,7 +569,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     cs.secondary
                 ),
                 FeatureTile(
-                    "Keep-safe",
+                    stringResource(R.string.ks_title),
                     Icons.Default.Favorite,
                     "keepsafe",
                     cs.errorContainer,
@@ -759,7 +783,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 scope.launch {
                     val result = snackbarHostState.showSnackbar(
                         message = context.getString(R.string.common_saved_ks),
-                        actionLabel = "Undo",
+                        actionLabel = undoLabel,
                         duration = SnackbarDuration.Short
                     )
                     if (result == SnackbarResult.ActionPerformed) {

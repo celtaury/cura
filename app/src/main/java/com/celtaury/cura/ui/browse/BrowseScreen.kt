@@ -105,6 +105,8 @@ private fun BrowseContent(onBack: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
+    // Resolved at composition for non-composable callbacks (snackbar labels).
+    val undoLabel = stringResource(R.string.common_btn_undo)
 
     var months by remember { mutableStateOf<List<Pair<String, List<MediaItem>>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -132,7 +134,7 @@ private fun BrowseContent(onBack: () -> Unit) {
                     context.getString(R.string.common_saved_keepsafe, item.displayName)
                 else
                     context.resources.getQuantityString(R.plurals.common_kept_safe_n, group.size, group.size),
-                actionLabel = "Undo",
+                actionLabel = undoLabel,
                 duration = SnackbarDuration.Long
             )
             if (result == SnackbarResult.ActionPerformed) {
@@ -163,15 +165,18 @@ private fun BrowseContent(onBack: () -> Unit) {
         DeckPrefs.setQueue(context, BROWSE_ROUTE, queued.map { it.uri.toString() })
     }
 
-    val purge = rememberConfirmableDelete(onCleaned = {
-        val bytes = queued.sumOf { it.sizeBytes }
-        val count = queued.size
+    val purge = rememberConfirmableDelete(onCleaned = { cleaned ->
+        // Only what Android actually deleted is hidden and credited; denied
+        // items stay visible and queued for another try.
+        val granted = cleaned.map { it.uri.toString() }.toSet()
+        val bytes = cleaned.sumOf { it.sizeBytes }
+        val count = cleaned.size
         SavedStats.addClean(context, bytes)
         keepUndoJob?.cancel()   // purged files are gone — a stale keep-undo must not un-hide them
         pendingKeeps = emptyList()
-        hidden = hidden + queued.map { it.uri.toString() }.toSet()
-        queued = emptyList()
-        DeckPrefs.setQueue(context, BROWSE_ROUTE, emptyList())
+        hidden = hidden + granted
+        queued = queued.filterNot { it.uri.toString() in granted }
+        DeckPrefs.setQueue(context, BROWSE_ROUTE, queued.map { it.uri.toString() })
         scope.launch {
             snack.showSnackbar(
                 context.resources.getQuantityString(R.plurals.common_purged_n, count, count, humanBytes(bytes))

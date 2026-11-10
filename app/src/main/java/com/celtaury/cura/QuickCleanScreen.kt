@@ -122,6 +122,8 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
     var phase by remember { mutableStateOf("scanning") }
     val warming = stringResource(R.string.qq_warming)
     var scanStatus by remember { mutableStateOf(warming) }
+    // Resolved at composition for non-composable callbacks (snackbar labels).
+    val undoLabel = stringResource(R.string.common_btn_undo)
     var categories by remember { mutableStateOf<List<JunkCategory>>(emptyList()) }
     var selectedCategoryKey by remember { mutableStateOf("all") }
     var queuedUris by remember { mutableStateOf(DeleteQueuePrefs.getQueue(context, "quick_clean")) }
@@ -179,6 +181,10 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 cat.copy(items = cat.items.filter { seen.add(it.uri.toString()) })
             }.filter { it.items.isNotEmpty() }
         }
+        // Queue entries whose files no longer scan (deleted outside the app)
+        // would otherwise sit in the FAB count forever — drop them once.
+        val scanned = categories.flatMap { it.items }.map { it.uri.toString() }.toSet()
+        queuedUris = queuedUris intersect scanned
         phase = "ready"
     }
 
@@ -221,7 +227,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                     context.getString(R.string.common_saved_keepsafe, item.displayName)
                 else
                     context.resources.getQuantityString(R.plurals.common_kept_safe_n, group.size, group.size),
-                actionLabel = "Undo",
+                actionLabel = undoLabel,
                 duration = SnackbarDuration.Long
             )
             if (result == SnackbarResult.ActionPerformed) {
@@ -246,25 +252,33 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
 
     // Confirmable delete sheet before system deletion
     val confirmDelete = rememberConfirmableDelete(
-        onCleaned = {
+        onCleaned = { cleaned ->
             commitKeeps()   // cleaned items are gone for good — a stale keep-undo must not resurrect them
-            val allItems = categories.flatMap { it.items }
-            val deletedItems = allItems.filter { it.uri.toString() in queuedUris }
-            val freedBytes = deletedItems.sumOf { it.sizeBytes }
+            // Only what Android actually deleted leaves the screen and the
+            // counter; denied items stay listed AND queued for another try.
+            val granted = cleaned.map { it.uri.toString() }.toSet()
+            val freedBytes = cleaned.sumOf { it.sizeBytes }
 
             if (freedBytes > 0L) {
                 SavedStats.addClean(context, freedBytes)
             }
 
             categories = categories.map { cat ->
-                cat.copy(items = cat.items.filter { it.uri.toString() !in queuedUris })
+                cat.copy(items = cat.items.filter { it.uri.toString() !in granted })
             }.filter { it.items.isNotEmpty() }
 
-            queuedUris = emptySet()
-            DeleteQueuePrefs.clear(context, "quick_clean")
+            queuedUris = queuedUris - granted
             Toast.makeText(context, context.getString(R.string.common_cleaned_ok), Toast.LENGTH_SHORT).show()
         }
     )
+
+    // A category that just emptied must not leave a dead chip selected —
+    // the list would render blank with nothing highlighted.
+    LaunchedEffect(categories) {
+        if (selectedCategoryKey != "all" && categories.none { it.key == selectedCategoryKey }) {
+            selectedCategoryKey = "all"
+        }
+    }
 
     // Items to display based on category filter
     val displayedItems = remember(categories, selectedCategoryKey) {
@@ -457,17 +471,23 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                         }
                                         OutlinedButton(
                                             onClick = {
-                                                queuedUris = if (queuedUris.size == displayedItems.size) {
-                                                    emptySet()
+                                                // Union / subtract the SHOWN items only —
+                                                // never wipe queued items from other filters.
+                                                val shown = displayedItems.map { it.uri.toString() }.toSet()
+                                                queuedUris = if (shown.isNotEmpty() && shown.all { it in queuedUris }) {
+                                                    queuedUris - shown
                                                 } else {
-                                                    displayedItems.map { it.uri.toString() }.toSet()
+                                                    queuedUris + shown
                                                 }
                                             },
                                             shape = CircleShape,
                                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                                         ) {
                                             Text(
-                                                if (queuedUris.size == displayedItems.size) stringResource(R.string.common_clear_queue) else stringResource(R.string.common_queue_all),
+                                                if (displayedItems.isNotEmpty() && displayedItems.all { it.uri.toString() in queuedUris })
+                                                    stringResource(R.string.common_clear_queue)
+                                                else
+                                                    stringResource(R.string.common_queue_all),
                                                 fontSize = 12.sp
                                             )
                                         }
@@ -610,12 +630,12 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                                             ) {
                                                                 Icon(
                                                                     Icons.Default.Delete,
-                                                                    contentDescription = "Queued",
+                                                                    contentDescription = stringResource(R.string.prev_queued_short),
                                                                     tint = cs.onErrorContainer,
                                                                     modifier = Modifier.size(14.dp)
                                                                 )
                                                                 Text(
-                                                                    "Queued",
+                                                                    stringResource(R.string.prev_queued_short),
                                                                     fontSize = 11.sp,
                                                                     fontWeight = FontWeight.Bold,
                                                                     color = cs.onErrorContainer
@@ -681,7 +701,7 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                         ) {
                                             Icon(
                                                 Icons.Default.Delete,
-                                                contentDescription = "Delete",
+                                                contentDescription = stringResource(R.string.common_delete_btn),
                                                 modifier = Modifier.size(18.dp)
                                             )
                                             Spacer(Modifier.width(6.dp))
@@ -693,7 +713,9 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                                     } else {
                                         Button(
                                             onClick = {
-                                                queuedUris = displayedItems.map { it.uri.toString() }.toSet()
+                                                // Add the shown items — keep whatever other
+                                                // filters already had queued.
+                                                queuedUris = queuedUris + displayedItems.map { it.uri.toString() }.toSet()
                                             },
                                             shape = CircleShape,
                                             colors = ButtonDefaults.buttonColors(

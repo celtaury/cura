@@ -141,6 +141,8 @@ fun KeepSafeScreen(onBack: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    // Resolved at composition for non-composable callbacks (snackbar labels).
+    val undoLabel = stringResource(R.string.common_btn_undo)
 
     var entries by remember { mutableStateOf<List<ProtectedEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -518,7 +520,7 @@ fun KeepSafeScreen(onBack: () -> Unit) {
                                                 scope.launch {
                                                     val result = snackbarHostState.showSnackbar(
                                                         message = context.getString(R.string.ks_unprotected_name, removed.name),
-                                                        actionLabel = "Undo",
+                                                        actionLabel = undoLabel,
                                                         duration = SnackbarDuration.Short
                                                     )
                                                     if (result == SnackbarResult.ActionPerformed) {

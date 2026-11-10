@@ -136,7 +136,8 @@ fun TrashScreen(onBack: () -> Unit) {
         restoring = true
         scope.launch {
             val total = picked.size
-            val restored = tryRestoreFromTrash(context, picked.map { it.uri })
+            val restoredUris = tryRestoreFromTrash(context, picked.map { it.uri })
+            val restored = restoredUris.size
             when {
                 restored == total -> {
                     Toast.makeText(
@@ -160,9 +161,12 @@ fun TrashScreen(onBack: () -> Unit) {
                         Toast.LENGTH_LONG
                     ).show()
             }
-            if (restored > 0) {
+            if (restoredUris.isNotEmpty()) {
                 withContext(Dispatchers.IO) {
-                    TrashLog.removeRestored(context, picked.map { it.uri.toString() }.toSet())
+                    // Only entries that ACTUALLY came back may leave the log —
+                    // a file the platform refused keeps its record (and its
+                    // place on this screen) for another try.
+                    TrashLog.removeRestored(context, restoredUris.map { it.toString() }.toSet())
                 }
             }
             reload()

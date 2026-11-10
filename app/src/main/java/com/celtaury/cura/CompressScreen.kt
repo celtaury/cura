@@ -69,6 +69,7 @@ import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.PermissionGate
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
+import com.celtaury.cura.core.ThemePrefs
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.theme.AccentOrange
@@ -368,7 +369,13 @@ private fun CompressContent(onBack: () -> Unit) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    val dark = isSystemInDarkTheme()
+    // Effective theme: follow the Settings override, not just the system
+    // setting — same fix as the dashboard's decorative gradients.
+    val dark = when (ThemePrefs.mode) {
+        ThemePrefs.LIGHT -> false
+        ThemePrefs.DARK -> true
+        else -> isSystemInDarkTheme()
+    }
     val orangeContainer = if (dark) AccentOrangeContainerDark else AccentOrangeContainer
     val onOrange = if (dark) OnAccentOrangeDark else OnAccentOrange
 
@@ -443,10 +450,17 @@ private fun CompressContent(onBack: () -> Unit) {
     val allFailed = stringResource(R.string.comp_all_failed)
 
     val delete = rememberConfirmableDelete(
-        onCleaned = {
-            val saved = pendingReplace?.second ?: 0L
+        onCleaned = { cleaned ->
+            // `cleaned` = originals Android actually deleted. Denied ones are
+            // still on disk: don't credit their bytes, and drop their SAVED
+            // badges (outcomes is keyed by the original's uri string).
+            val granted = cleaned.map { it.uri.toString() }.toSet()
+            val saved = cleaned.sumOf { it.sizeBytes }
             SavedStats.addClean(context, saved)
             resultSaved = saved
+            outcomes = outcomes.filter { (uri, outcome) ->
+                outcome.first != ItemOutcome.SAVED || uri in granted
+            }
             pendingReplace = null
             scope.launch { rescan() }
         },

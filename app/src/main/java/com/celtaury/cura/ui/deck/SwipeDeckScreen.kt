@@ -251,10 +251,18 @@ private fun DeckContent(
     }
 
     fun decide(item: MediaItem, action: String) {
+        // Same-card double-fire guard: during the 230 ms fly-off the gesture
+        // is still live on the old card, and a preview tap can race a swipe —
+        // a second decide() for the card already being judged would advance
+        // the index twice and, before the dedupe below, put the same URI
+        // twice into a LazyRow keyed by URI (an instant Compose crash).
+        // One card, one decision per visit — a legit re-decide always passes
+        // through undo() first, which pops the matching history entry.
+        if (history.lastOrNull()?.item?.uri == item.uri) return
         SuggestionEngine.observe(item, action)   // Batch 4: feed the leaf-tile brain
         if (action == "kept") {
             KeepSafe.add(context, item.uri)
-        } else {
+        } else if (queue.none { it.uri == item.uri }) {
             queue = queue + item
         }
         history = history + DeckDecision(item, action)
@@ -287,23 +295,33 @@ private fun DeckContent(
 
     // Summary "Confirm & Clean" routes through the same in-app confirm sheet
     // as every other flow — thumbnails + size before the system dialog.
-    val confirmDelete = rememberConfirmableDelete(onCleaned = {
-        val bytes = queue.sumOf { it.sizeBytes }
+    val confirmDelete = rememberConfirmableDelete(onCleaned = { cleaned ->
+        // `cleaned` is what Android ACTUALLY deleted — a half-denied batch
+        // must not credit the denied bytes or clear a queue still holding them.
+        val bytes = cleaned.sumOf { it.sizeBytes }
         SavedStats.addClean(context, bytes)
         sessionSaved += bytes
-        DeckPrefs.clear(context, route)
-        phase = "done"
+        val grantedUris = cleaned.map { it.uri }.toSet()
+        queue = queue.filterNot { it.uri in grantedUris }
+        if (queue.isEmpty()) {
+            DeckPrefs.clear(context, route)
+            phase = "done"
+        } else {
+            persist()          // denied items stay queued for another confirm
+            phase = "summary"
+        }
     })
 
     // Mid-deck purge: tap the queued pill → confirm sheet → blast, keep judging.
-    val purge = rememberConfirmableDelete(onCleaned = {
-        val bytes = queue.sumOf { it.sizeBytes }
-        val count = queue.size
+    val purge = rememberConfirmableDelete(onCleaned = { cleaned ->
+        val bytes = cleaned.sumOf { it.sizeBytes }
+        val count = cleaned.size
         SavedStats.addClean(context, bytes)
         sessionSaved += bytes
-        queue = emptyList()
+        val grantedUris = cleaned.map { it.uri }.toSet()
+        queue = queue.filterNot { it.uri in grantedUris }
         history = emptyList()
-        DeckPrefs.setQueue(context, route, emptyList())
+        DeckPrefs.setQueue(context, route, queue.map { it.uri.toString() })
         scope.launch {
             snack.showSnackbar(
                 context.resources.getQuantityString(R.plurals.common_purged_n, count, count, humanBytes(bytes))
@@ -464,7 +482,26 @@ private fun DeckContent(
             isQueued = queue.any { it.uri == item.uri },
             onToggleQueue = {
                 previewItem = null
-                decide(item, "queued")
+                if (queue.any { it.uri == item.uri }) {
+                    // "Release" must actually release: remove the item from
+                    // the queue and rewind the matching decision (the card
+                    // under preview is the one the deck is showing). Before,
+                    // this path called decide() again — re-queueing the very
+                    // item it promised to un-queue and skipping a card.
+                    queue = queue.filterNot { it.uri == item.uri }
+                    val last = history.lastOrNull()
+                    if (last?.item?.uri == item.uri && last.action == "queued") {
+                        history = history.dropLast(1)
+                        index = (index - 1).coerceAtLeast(0)
+                        SuggestionEngine.forget(item)
+                    }
+                    persist()
+                    phase = if (index >= items.size) {
+                        if (queue.isNotEmpty()) "summary" else "empty"
+                    } else "deck"
+                } else {
+                    decide(item, "queued")
+                }
             },
             onKeepSafe = {
                 previewItem = null

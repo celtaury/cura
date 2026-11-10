@@ -61,13 +61,17 @@ import com.celtaury.cura.R
  * the same system flow (and the same trash log) fires straight away.
  *
  * Usage:
- *   val delete = rememberConfirmableDelete(onCleaned = { ... })
+ *   val delete = rememberConfirmableDelete(onCleaned = { deletedItems -> ... })
  *   delete(listOfMediaItems)  // sheet first, then the Android delete dialog
+ *
+ * onCleaned receives exactly the items Android reports as deleted — a batch
+ * the user half-denied in the system dialog reports only the granted part,
+ * so callers never credit bytes or drop tiles for files still on disk.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun rememberConfirmableDelete(
-    onCleaned: () -> Unit,
+    onCleaned: (List<MediaItem>) -> Unit,
     onCancelled: () -> Unit = {}
 ): (List<MediaItem>) -> Unit {
     val context = LocalContext.current
@@ -99,7 +103,7 @@ fun rememberConfirmableDelete(
                     )
                 }
             }
-            onCleaned()
+            onCleaned(batch)
         },
         onCancelled = onCancelled
     )
@@ -141,6 +145,7 @@ fun rememberConfirmableDelete(
         }
     }
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
