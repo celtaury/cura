@@ -109,21 +109,6 @@ object SuggestionEngine {
         }
     }
 
-    /**
-     * Fresh family list for the leaf-tile tap. Memory-backed decks
-     * (deck_shots) get their items via DeckSource right before navigating;
-     * scanner-backed ones (deck_oldmedia) would rescan anyway.
-     */
-    suspend fun familyItems(context: Context, deckRoute: String): List<MediaItem> =
-        withContext(Dispatchers.IO) {
-            val items = when (deckRoute) {
-                "deck_shots" -> Scanner.oldScreenshots(context, minAgeDays = 30)
-                "deck_oldmedia" -> Scanner.oldMedia(context, minAgeDays = 60)
-                else -> emptyList()
-            }
-            items.filter { it.uri.toString() !in judged }
-        }
-
     /** Cheap classifier used at swipe time — no I/O, safe to call per card. */
     fun familyOf(item: MediaItem): String? {
         val p = item.path.lowercase()

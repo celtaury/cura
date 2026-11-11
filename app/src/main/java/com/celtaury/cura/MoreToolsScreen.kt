@@ -16,7 +16,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,7 +53,6 @@ import androidx.compose.ui.res.stringResource
 fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
-    var showReset by remember { mutableStateOf(false) }
 
     // Stats are read off the UI thread — StatFs/SharedPreferences in composition caused jank
     var savedBytes by remember { mutableStateOf(0L) }
@@ -147,9 +145,9 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
             ) {
                 onNavigate("trash")
             }
-            MenuRow(title = stringResource(R.string.more_reset), subtitle = stringResource(R.string.more_reset_sub)) {
-                showReset = true
-            }
+            // Batch F: the "reset saved-counter" row is gone. The impact
+            // counter is the user's deletion history — nothing in the app
+            // should offer to wipe it.
 
             Spacer(Modifier.height(20.dp))
 
@@ -194,23 +192,6 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
         }
     }
 
-    if (showReset) {
-        AlertDialog(
-            onDismissRequest = { showReset = false },
-            title = { Text(stringResource(R.string.more_reset_dlg)) },
-            text = { Text(stringResource(R.string.more_reset_body)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    SavedStats.reset(context)
-                    showReset = false
-                    onBack()
-                }) { Text(stringResource(R.string.more_reset_btn)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showReset = false }) { Text(stringResource(R.string.common_cancel)) }
-            }
-        )
-    }
 }
 
 @Composable

@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -316,7 +317,19 @@ private fun SuggestContent(onBack: () -> Unit) {
                 TopAppBar(
                     title = {
                         Column {
-                            Text(stringResource(R.string.sug_title), fontWeight = FontWeight.Bold)
+                            // Batch F: the header says WHY — the current
+                            // card's finding type replaces the static title
+                            // while a deck is open (user report).
+                            val currentCard = cards.getOrNull(index)
+                            val why = currentCard?.let { s ->
+                                tagLabelRes(s.tag).takeIf { it != 0 }
+                                    ?.let { stringResource(it) }
+                            }
+                            Text(
+                                if (phase == "deck" && why != null) why
+                                else stringResource(R.string.sug_title),
+                                fontWeight = FontWeight.Bold
+                            )
                             Text(
                                 stringResource(R.string.sug_sub),
                                 fontSize = 12.sp,
@@ -544,12 +557,15 @@ private fun DeckPhase(
         }
         Spacer(Modifier.height(10.dp))
 
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentAlignment = Alignment.Center
         ) {
+            // Height caps the card width (Batch F): on button-nav devices the
+            // old width-driven card rode up over the header progress bar.
+            val cardWidth = minOf(maxWidth - 48.dp, maxHeight * 0.72f - 8.dp)
             // next cards peeking behind — identical stack to every deck
             for (depth in 2 downTo 1) {
                 val next = cards.getOrNull(index + depth)
@@ -557,8 +573,7 @@ private fun DeckPhase(
                     DeckCard(
                         item = next.item,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
+                            .width(cardWidth)
                             .aspectRatio(0.72f)
                             .graphicsLayer {
                                 val shrink = 1f - 0.05f * depth
@@ -578,8 +593,7 @@ private fun DeckPhase(
                     DeckCard(
                         item = current.item,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
+                            .width(cardWidth)
                             .aspectRatio(0.72f),
                         interactive = true,
                         onDecide = onDecide,

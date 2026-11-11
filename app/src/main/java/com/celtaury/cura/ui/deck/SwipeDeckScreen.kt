@@ -2,7 +2,9 @@ package com.celtaury.cura.ui.deck
 
 import android.content.Context
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -12,6 +14,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,6 +60,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +69,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,27 +97,14 @@ import com.celtaury.cura.core.monthLabelOf
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
+import com.celtaury.cura.ui.theme.CuraDesign
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.celtaury.cura.R
-
-/**
- * In-memory handoff for decks whose items are already known
- * (Quick Clean categories, Social Cleaner tabs). The caller fills this
- * right before navigating to the deck route.
- */
-object DeckSource {
-    var id: String = ""
-    var items: List<MediaItem> = emptyList()
-
-    fun set(id: String, items: List<MediaItem>) {
-        this.id = id
-        this.items = items
-    }
-}
 
 private class DeckSpec(
     val titleRes: Int,
@@ -128,21 +121,14 @@ private data class DeckDecision(
     val action: String
 )
 
-/** Route → deck registry. loader == null → memory-backed via [DeckSource]. */
+/**
+ * Route → deck registry. Every deck is scanner-backed; the eleven
+ * never-navigated memory-backed routes (deck_qc_all, deck_soc_*, …) were
+ * removed in Batch F — they could only ever render an empty deck.
+ */
 private val deckSpecs = mapOf(
     "deck_gallery" to DeckSpec(R.string.deck_gallery_title, R.string.deck_gallery_subtitle) { Scanner.galleryDeck(it) },
-    "deck_oldmedia" to DeckSpec(R.string.deck_oldmedia_title, R.string.deck_oldmedia_subtitle) { Scanner.oldMedia(it) },
-    "deck_empty" to DeckSpec(R.string.deck_empty_title, R.string.deck_empty_subtitle),
-    "deck_apks" to DeckSpec(R.string.deck_apks_title, R.string.deck_apks_subtitle),
-    "deck_dupes" to DeckSpec(R.string.deck_dupes_title, R.string.deck_dupes_subtitle),
-    "deck_shots" to DeckSpec(R.string.deck_shots_title, R.string.deck_shots_subtitle),
-    "deck_qc_all" to DeckSpec(R.string.deck_qc_all_title, R.string.deck_qc_all_subtitle),
-    "deck_soc_all" to DeckSpec(R.string.deck_soc_all_title, R.string.deck_soc_all_subtitle),
-    "deck_soc_images" to DeckSpec(R.string.deck_soc_images_title, R.string.deck_soc_images_subtitle),
-    "deck_soc_videos" to DeckSpec(R.string.deck_soc_videos_title, R.string.deck_soc_videos_subtitle),
-    "deck_soc_docs" to DeckSpec(R.string.deck_soc_docs_title, R.string.deck_soc_docs_subtitle),
-    "deck_soc_audio" to DeckSpec(R.string.deck_soc_audio_title, R.string.deck_soc_audio_subtitle),
-    "deck_soc_stickers" to DeckSpec(R.string.deck_soc_stickers_title, R.string.deck_soc_stickers_subtitle)
+    "deck_oldmedia" to DeckSpec(R.string.deck_oldmedia_title, R.string.deck_oldmedia_subtitle) { Scanner.oldMedia(it) }
 )
 
 /** Entry used by MainActivity for every "deck_" route. */
@@ -222,7 +208,7 @@ private fun DeckContent(
         val loaded = withContext(Dispatchers.IO) {
             loader?.invoke(context)
                 ?.filter { !KeepSafe.contains(context, it.uri) }
-                ?: (if (DeckSource.id == route) DeckSource.items else emptyList())
+                ?: emptyList()
         }
         val savedIndex = DeckPrefs.index(context, route)
         val savedQueueUris = DeckPrefs.queue(context, route).toSet()
@@ -545,11 +531,11 @@ private fun DeckPhase(
     val cs = MaterialTheme.colorScheme
     val current = items.getOrNull(index)
 
-    // Swipe side glow (Batch C2 prototype): -1f = card being thrown left
-    // (clean → red), +1f = thrown right (keep → green). Written by the top
-    // card's drag, read only inside the glow's draw phase — no recomposition
-    // per drag frame.
-    val swipeGlow = remember { mutableStateOf(0f) }
+    // Swipe side glow: -1f = card being thrown left (clean → red), +1f =
+    // thrown right (keep → green). DeckCard reports drag frames and a 0f
+    // release; the state fades the glow out on release (Batch F — it used
+    // to pop off instantly).
+    val glowState = remember { DeckGlowState() }
 
     // Purge pill pulse: bump-scale the thumb-zone CTA each time the queue
     // grows, so it announces itself while you judge. Also fires once on
@@ -576,15 +562,20 @@ private fun DeckPhase(
         // (purge pill moved to the thumb zone below the action buttons)
         Spacer(Modifier.height(10.dp))
 
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            // the side being thrown toward lights up (prototype knobs live in
-            // DeckSideGlow below — restyle freely)
-            DeckSideGlow(progress = { swipeGlow.value })
+            // Keep every card inside BOTH edges: on short screens (button
+            // navigation) a width-driven card rides up over the header's
+            // progress bar and top bar. Height caps the width; width fills
+            // the rest (Batch F — the "margin problem card").
+            val cardWidth = minOf(maxWidth - 48.dp, maxHeight * 0.72f - 8.dp)
+            // the side being thrown toward lights up (Batch F: radial wash,
+            // no more top/bottom clipping; knobs live in CuraDesign)
+            DeckSideGlow(state = glowState)
             // next cards peeking behind
             for (depth in 2 downTo 1) {
                 val next = items.getOrNull(index + depth)
@@ -592,8 +583,7 @@ private fun DeckPhase(
                     DeckCard(
                         item = next,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
+                            .width(cardWidth)
                             .aspectRatio(0.72f)
                             .graphicsLayer {
                                 val shrink = 1f - 0.05f * depth
@@ -613,13 +603,12 @@ private fun DeckPhase(
                     DeckCard(
                         item = current,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp)
+                            .width(cardWidth)
                             .aspectRatio(0.72f),
                         interactive = true,
                         onDecide = onDecide,
                         onPreview = onPreview,
-                        onDragProgress = { swipeGlow.value = it }
+                        onDragProgress = { glowState.onDrag(it) }
                     )
                 }
             }
@@ -756,7 +745,7 @@ internal fun DeckCard(
             }
     } else modifier
 
-    Box(cardModifier.clip(RoundedCornerShape(28.dp))) {
+    Box(cardModifier.clip(RoundedCornerShape(CuraDesign.radiusDeckCard))) {
         // colored reveal behind the card while dragging
         Box(
             modifier = Modifier
@@ -884,60 +873,103 @@ private fun SwipeHint(text: String, color: Color, modifier: Modifier = Modifier,
 }
 
 /**
- * Swipe side glow — PROTOTYPE (Batch C2). The side the card is being thrown
- * toward lights up: green on the right (keep safe), red on the left (clean).
+ * Swipe-side glow state (Batch F). DeckCard keeps its old contract — drag
+ * frames report -1f..1f, and onDragEnd/onDragCancel signal release with 0f —
+ * so nothing in the gesture layer changed. The state translates that into:
+ *   · instant tracking while the finger is down,
+ *   · a soft FADE-OUT on release (the old glow snapped off, which read as
+ *     a flicker),
+ *   · and the fade cancels itself the moment a new drag starts.
+ */
+class DeckGlowState {
+    var dragValue by mutableFloatStateOf(0f)
+        private set
+    var dragTick by mutableIntStateOf(0)
+        private set
+    var releaseTick by mutableIntStateOf(0)
+        private set
+    var releaseStart = 0f
+        private set
+
+    fun onDrag(value: Float) {
+        if (value == 0f) {
+            if (dragValue != 0f) {
+                releaseStart = dragValue
+                releaseTick += 1
+            }
+        } else {
+            dragValue = value
+            dragTick += 1
+        }
+    }
+}
+
+/**
+ * Swipe side glow. The side the card is being thrown toward lights up:
+ * green on the right (keep safe), red on the left (clean).
  *
- * Deliberately plain so the UI pass can restyle it freely — every knob is in
- * the marked block below, and the only contract is [progress]: -1f..1f,
- * read per frame inside the draw phase (a drag never recomposes this).
- *   · negative → left (delete) glow · positive → right (save) glow
- *   · magnitude → strength, eased quadratically so it ramps in softly
+ * Batch F restyle (user report: the glow "clipped" hard at the top and
+ * bottom edges and vanished without fading):
+ *   · each side is now a RADIAL wash anchored at its screen edge — no more
+ *     rectangular band with visible cutoffs at the top and bottom;
+ *   · alpha still eases quadratically and is read inside the draw phase,
+ *     so a drag never recomposes.
+ * Colors, ceiling and fade time live in [CuraDesign] (design language).
  */
 @Composable
 private fun DeckSideGlow(
-    progress: () -> Float,
+    state: DeckGlowState,
     modifier: Modifier = Modifier
 ) {
-    // ── knobs for the UI pass ──────────────────────────────
-    val saveGlowColor = Color(0xFF2ECC71)   // green — thrown right
-    val deleteGlowColor = Color(0xFFFF4D4F) // red — thrown left
-    val glowWidthFraction = 0.45f           // each side's share of the deck
-    val glowMaxAlpha = 0.60f                // ceiling at a full throw
-    // ───────────────────────────────────────────────────────
+    var display by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(state.dragTick, state.releaseTick) {
+        if (state.releaseTick > state.dragTick) {
+            animate(
+                initialValue = state.releaseStart,
+                targetValue = 0f,
+                animationSpec = tween(CuraDesign.glowFadeMs, easing = FastOutSlowInEasing)
+            ) { value, _ -> display = value }
+        } else {
+            display = state.dragValue
+        }
+    }
 
     Box(modifier.fillMaxSize()) {
         // left — delete
         Box(
             Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(glowWidthFraction)
+                .fillMaxSize()
                 .graphicsLayer {
-                    val p = (-progress()).coerceIn(0f, 1f)
-                    alpha = p * p * glowMaxAlpha
+                    val p = (-display).coerceIn(0f, 1f)
+                    alpha = p * p * CuraDesign.glowMaxAlpha
                 }
-                .background(
-                    Brush.horizontalGradient(
-                        0f to deleteGlowColor,
-                        1f to Color.Transparent
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(CuraDesign.glowDelete, Color.Transparent),
+                            center = Offset(0f, size.height / 2f),
+                            radius = size.height * 0.85f
+                        )
                     )
-                )
+                }
         )
         // right — keep
         Box(
             Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .fillMaxWidth(glowWidthFraction)
+                .fillMaxSize()
                 .graphicsLayer {
-                    val p = progress().coerceIn(0f, 1f)
-                    alpha = p * p * glowMaxAlpha
+                    val p = display.coerceIn(0f, 1f)
+                    alpha = p * p * CuraDesign.glowMaxAlpha
                 }
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color.Transparent,
-                        1f to saveGlowColor
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(CuraDesign.glowSave, Color.Transparent),
+                            center = Offset(size.width, size.height / 2f),
+                            radius = size.height * 0.85f
+                        )
                     )
-                )
+                }
         )
     }
 }

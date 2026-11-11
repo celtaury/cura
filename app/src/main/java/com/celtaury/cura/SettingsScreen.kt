@@ -60,6 +60,11 @@ import androidx.core.os.LocaleListCompat
 import com.celtaury.cura.ui.theme.InterBlack
 import androidx.compose.ui.res.stringResource
 
+/** Privacy policy — hosted page, opened in the browser (Batch F).
+ *  Deliberately NOT in CuraLinks: that file is the user's local donation-URL
+ *  copy and is never shipped by a batch. */
+private const val PRIVACY_URL = "https://celtaury.github.io/privacy.html"
+
 /**
  * Settings, UX v2 (v1 scope): theme, permissions, trash helper.
  * The trash helper is written for the elderly test: short steps, big button.
@@ -189,6 +194,16 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 title = stringResource(R.string.set_replay_title),
                 subtitle = stringResource(R.string.set_replay_sub)
             ) { onNavigate("onboarding") }
+
+            // Privacy policy (Batch F) — plain web page, opened in the browser.
+            MenuRow(
+                title = stringResource(R.string.set_privacy_title),
+                subtitle = stringResource(R.string.set_privacy_sub)
+            ) {
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_URL)))
+                }
+            }
 
             // ── Permissions ──
             SectionCard(title = stringResource(R.string.set_perm_title)) {

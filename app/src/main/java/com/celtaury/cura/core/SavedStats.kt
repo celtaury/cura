@@ -29,8 +29,4 @@ object SavedStats {
             .putInt(KEY_CLEANS, p.getInt(KEY_CLEANS, 0) + 1)
             .apply()
     }
-
-    fun reset(context: Context) {
-        prefs(context).edit().clear().apply()
-    }
 }

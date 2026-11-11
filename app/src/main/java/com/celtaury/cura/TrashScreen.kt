@@ -1,5 +1,6 @@
 package com.celtaury.cura
 
+import android.annotation.SuppressLint
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
@@ -25,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,12 +61,14 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.TrashLog
 import com.celtaury.cura.core.humanBytes
+import com.celtaury.cura.core.rememberDeleteController
 import com.celtaury.cura.core.tryRestoreFromTrash
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.core.net.toUri
 
 /**
  * One row in the recovery list. Two sources feed it:
@@ -92,8 +96,10 @@ private data class TrashedFile(
  * what it deleted (what / when / size); system-trash rows are merged in when
  * Android returns them. The screen copy says exactly that.
  *
- * Written to the elderly test: short words, big buttons — and deliberately
- * NO "empty trash": this screen only gives files back, never destroys.
+ * Written to the elderly test: short words, big buttons. Since Batch F the
+ * screen also offers "Delete everything" — a double-confirmed purge (in-app
+ * dialog first, Android's own consent dialog on 11+), so nothing vanishes
+ * in one accidental tap.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,10 +115,12 @@ fun TrashScreen(onBack: () -> Unit) {
     var restoring by remember { mutableStateOf(false) }
 
     // Log first (always works), system-trash rows merged in as a bonus.
+    // (Declared BEFORE the purge/restore code below on purpose: Kotlin local
+    //  functions cannot be referenced before their declaration point.)
     suspend fun reload() = withContext(Dispatchers.IO) {
         val logged = TrashLog.entries(context).map { entry ->
             TrashedFile(
-                uri = Uri.parse(entry.uri),
+                uri = entry.uri.toUri(),
                 name = entry.name,
                 bytes = entry.bytes,
                 expiresAt = entry.trashedAtMs + TrashLog.TRASH_WINDOW_DAYS * 86_400_000L,
@@ -124,6 +132,51 @@ fun TrashScreen(onBack: () -> Unit) {
         val live = queryTrash(context).filter { row -> row.uri.toString() !in seenUris }
         files.clear()
         files.addAll(logged + live)
+    }
+
+    // ── Delete everything (Batch F) — this screen's one destructive act.
+    var purgeOpen by remember { mutableStateOf(false) }
+    var purging by remember { mutableStateOf(false) }
+
+    fun requestPurge() {
+        if (purging || restoring || files.isEmpty()) return
+        purgeOpen = true
+    }
+
+    val purgeController = rememberDeleteController(
+        onCleaned = { deletedUris ->
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    // A purge is an EXIT, not another delete: the entries
+                    // must LEAVE the log. (Only the confirm-sheet wrapper
+                    // re-records deletes; the raw controller doesn't.)
+                    TrashLog.removeRestored(context, deletedUris.map { it.toString() }.toSet())
+                }
+                reload()
+                purging = false
+            }
+        },
+        onCancelled = { purging = false }
+    )
+
+    fun purgeConfirmed() {
+        purging = true
+        scope.launch {
+            val (live, ghosts) = withContext(Dispatchers.IO) {
+                files.toList().partition { rowExists(context, it.uri) }
+            }
+            if (ghosts.isNotEmpty()) {
+                // Rows the OS already purged (its ~30-day sweep): deleting
+                // them again is impossible — purging means leaving the log.
+                TrashLog.removeRestored(context, ghosts.map { it.uri.toString() }.toSet())
+            }
+            if (live.isEmpty()) {
+                reload()
+                purging = false
+            } else {
+                purgeController(live.map { it.uri })
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -138,29 +191,11 @@ fun TrashScreen(onBack: () -> Unit) {
             val total = picked.size
             val restoredUris = tryRestoreFromTrash(context, picked.map { it.uri })
             val restored = restoredUris.size
-            when {
-                restored == total -> {
-                    Toast.makeText(
-                        context,
-                        context.resources.getQuantityString(
-                            R.plurals.trash_back_gallery, restored, restored
-                        ),
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                restored > 0 ->
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.trash_partial, restored, total),
-                        Toast.LENGTH_LONG
-                    ).show()
-                else ->
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.trash_locked),
-                        Toast.LENGTH_LONG
-                    ).show()
-            }
+            Toast.makeText(
+                context,
+                restoreToastMessage(context, restored, total),
+                Toast.LENGTH_LONG
+            ).show()
             if (restoredUris.isNotEmpty()) {
                 withContext(Dispatchers.IO) {
                     // Only entries that ACTUALLY came back may leave the log —
@@ -174,6 +209,10 @@ fun TrashScreen(onBack: () -> Unit) {
         }
     }
 
+    // Hoisted into composition (a composable read): survives locale changes
+    // and keeps the LocalContext resource lint quiet.
+    val filesHint = stringResource(R.string.common_files_hint)
+
     fun openFilesApp() {
         val ok = runCatching {
             val intent = Intent(Intent.ACTION_VIEW)
@@ -181,11 +220,7 @@ fun TrashScreen(onBack: () -> Unit) {
             context.startActivity(intent)
         }.isSuccess
         if (!ok) {
-            Toast.makeText(
-                context,
-                context.getString(R.string.common_files_hint),
-                Toast.LENGTH_LONG
-            ).show()
+            Toast.makeText(context, filesHint, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -279,7 +314,6 @@ fun TrashScreen(onBack: () -> Unit) {
                 // ── The list: Cura's log first, soonest-to-vanish first ──
                 else -> {
                     val totalBytes = files.sumOf { it.bytes }
-                    val noun = if (files.size == 1) "file" else "files"
                     Text(
                         pluralStringResource(R.plurals.trash_waiting, files.size, files.size, humanBytes(totalBytes)),
                         fontSize = 13.sp,
@@ -306,6 +340,17 @@ fun TrashScreen(onBack: () -> Unit) {
                         )
                     }
                     TextButton(
+                        onClick = { requestPurge() },
+                        enabled = !purging && !restoring,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            stringResource(R.string.trash_purge_btn),
+                            color = cs.error,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    TextButton(
                         onClick = { openFilesApp() },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text(stringResource(R.string.trash_open_files_instead)) }
@@ -319,6 +364,38 @@ fun TrashScreen(onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (purgeOpen) {
+        AlertDialog(
+            onDismissRequest = { purgeOpen = false },
+            title = { Text(stringResource(R.string.trash_purge_title)) },
+            text = {
+                Text(
+                    pluralStringResource(
+                        R.plurals.trash_purge_body, files.size, files.size,
+                        humanBytes(files.sumOf { it.bytes })
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    purgeOpen = false
+                    purgeConfirmed()
+                }) {
+                    Text(
+                        stringResource(R.string.trash_purge_btn),
+                        color = cs.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { purgeOpen = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            }
+        )
     }
 }
 
@@ -361,6 +438,37 @@ private fun TrashRow(file: TrashedFile, onRestore: () -> Unit) {
         }
     }
 }
+
+/**
+ * Toast copy for a restore attempt. Lives outside composition on purpose:
+ * two of the three messages carry runtime quantities, and stringResource /
+ * pluralStringResource are @Composable-only — there is no composable API for
+ * a plural formatted inside a coroutine callback.
+ *
+ * Suppressed: LocalContextGetResourceValueCall would prefer stringResource,
+ * but these strings are consumed the instant they are built (a Toast that
+ * shows and dies) — nothing is cached across configuration changes, so the
+ * stale-read risk the check guards against cannot reach the user.
+ */
+@SuppressLint("LocalContextGetResourceValueCall")
+private fun restoreToastMessage(context: Context, restored: Int, total: Int): String = when {
+    restored == total -> context.resources.getQuantityString(
+        R.plurals.trash_back_gallery, restored, restored
+    )
+    restored > 0 -> context.getString(R.string.trash_partial, restored, total)
+    else -> context.getString(R.string.trash_locked)
+}
+
+/**
+ * True when the MediaStore row still exists. Log entries the OS already
+ * swept (its ~30-day trash purge) are ghosts — for them, "deleting" can
+ * only mean leaving Cura's log.
+ */
+private fun rowExists(context: Context, uri: Uri): Boolean = runCatching {
+    context.contentResolver
+        .query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
+        ?.use { it.count > 0 } == true
+}.getOrDefault(false)
 
 /** "deleted 2 days ago · 1.4 MB · purges in ~28 days" — plain, honest words. */
 private fun metaLine(file: TrashedFile): String {
