@@ -41,12 +41,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -559,21 +559,24 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(20.dp))
 
-            // ── Secondary Tiles (Review Gallery removed to avoid redundancy) ──
+            // ── Secondary tiles (Batch G): Summary takes Browse's slot —
+            // the month-raid gallery died, the decks already cover judging.
+            // Keep Safe moved into More Tools as "Manager"; its tile now
+            // leads to Large Files, promoted out of the legacy attic.
             val tiles = listOf(
                 FeatureTile(
-                    stringResource(R.string.dash_open_browse),
-                    Icons.Default.CalendarMonth,
-                    "browse_gallery",
+                    stringResource(R.string.dash_open_summary),
+                    Icons.Default.Insights,
+                    "summary",
                     cs.secondaryContainer,
                     cs.secondary
                 ),
                 FeatureTile(
-                    stringResource(R.string.ks_title),
-                    Icons.Default.Favorite,
-                    "keepsafe",
-                    cs.errorContainer,
-                    cs.error
+                    stringResource(R.string.dash_open_large),
+                    Icons.Default.Storage,
+                    "large_files",
+                    cs.tertiaryContainer,
+                    cs.tertiary
                 ),
                 FeatureTile(
                     stringResource(R.string.dash_open_more),

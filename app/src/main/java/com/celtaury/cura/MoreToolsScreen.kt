@@ -135,8 +135,9 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
 
             Spacer(Modifier.height(14.dp))
 
-            // Menu rows
-            MenuRow(title = stringResource(R.string.more_ks), subtitle = stringResource(R.string.more_ks_sub)) {
+            // Menu rows. Batch G: Keep Safe is "Manager" now — same screen,
+            // honest name: it manages the files you saved from cleanup.
+            MenuRow(title = stringResource(R.string.more_manager), subtitle = stringResource(R.string.more_manager_sub)) {
                 onNavigate("keepsafe")
             }
             MenuRow(
@@ -152,18 +153,14 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
             Spacer(Modifier.height(20.dp))
 
             // ── Legacy tools (still work, just live in the attic now) ──
+            // Batch G: the Large Files row left the attic — it took over
+            // Keep Safe's old dashboard tile instead.
             Text(
                 stringResource(R.string.more_legacy),
                 style = MaterialTheme.typography.titleSmall,
                 color = cs.onSurfaceVariant
             )
             Spacer(Modifier.height(6.dp))
-            MenuRow(
-                title = stringResource(R.string.more_large),
-                subtitle = stringResource(R.string.more_large_sub)
-            ) {
-                onNavigate("large_files")
-            }
             MenuRow(
                 title = stringResource(R.string.more_org),
                 subtitle = stringResource(R.string.more_org_sub)

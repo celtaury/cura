@@ -94,7 +94,9 @@ private fun filterLabelRes(key: String): Int = when (key) {
     "Quick Clean" -> R.string.dash_quick_clean
     "WhatsApp" -> R.string.src_whatsapp
     "Suggestions" -> R.string.src_suggestions
-    "Browse Gallery" -> R.string.dash_open_browse
+    // "Browse Gallery" keeps mapping even though that screen died in Batch G:
+    // files kept back then still carry the tag in their stored source field.
+    "Browse Gallery" -> R.string.src_browse_legacy
     "Gallery" -> R.string.src_gallery
     else -> R.string.ks_filter_all
 }
