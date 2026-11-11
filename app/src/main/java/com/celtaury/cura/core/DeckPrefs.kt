@@ -50,4 +50,15 @@ object DeckPrefs {
     fun setCoachDone(context: Context) {
         prefs(context).edit().putBoolean("coach_done", true).apply()
     }
+
+    /**
+     * Batch H: deck ⇄ list view preference, per tool route. Default is the
+     * deck — the list is the alternative for people who'd rather scan rows.
+     */
+    fun isDeck(context: Context, deckId: String): Boolean =
+        prefs(context).getBoolean("view_$deckId", true)
+
+    fun setDeck(context: Context, deckId: String, deck: Boolean) {
+        prefs(context).edit().putBoolean("view_$deckId", deck).apply()
+    }
 }

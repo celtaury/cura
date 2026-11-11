@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -20,6 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -52,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -68,14 +72,17 @@ import com.celtaury.cura.core.SuggestEngine
 import com.celtaury.cura.core.SuggestPrefs
 import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.humanBytes
+import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.deck.DeckCard
 import com.celtaury.cura.ui.deck.SummaryPhase
+import com.celtaury.cura.ui.deck.ViewModeToggle
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.stringResource
+import coil.compose.AsyncImage
 
 /**
  * Suggested for you — the reason-first deck (overhaul round 1).
@@ -136,6 +143,8 @@ private fun SuggestContent(onBack: () -> Unit) {
     var sessionSaved by remember { mutableStateOf(0L) }
     var allTimeSaved by remember { mutableStateOf(0L) }
     var previewItem by remember { mutableStateOf<MediaItem?>(null) }
+    // List ⇄ deck view (Batch H): the Suggest deal can be judged as rows.
+    var deckView by remember { mutableStateOf(DeckPrefs.isDeck(context, DECK_ID)) }
 
     // ── load: restore the resting session, else deal a fresh one ──
     LaunchedEffect(Unit) {
@@ -227,6 +236,36 @@ private fun SuggestContent(onBack: () -> Unit) {
             SuggestPrefs.unjudge(context, it.uri.toString())
             SuggestionEngine.forget(it)
         }
+    }
+
+    /**
+     * Batch H: list-mode judgement — the deck's side effects, minus the
+     * index arithmetic. The card leaves the deal instead, so the deck
+     * resumes exactly at cards[index] when you switch back. Undo stays a
+     * deck-gesture feature; the list is for fast row-by-row triage.
+     */
+    fun listDecide(item: MediaItem, action: String) {
+        when (action) {
+            "kept" -> {
+                KeepSafe.add(context, item.uri, "Suggestions")
+                SuggestionEngine.observe(item, "kept")
+            }
+            "queued" -> {
+                SuggestionEngine.observe(item, action)
+                queue = queue + item
+            }
+        }
+        if (action == "skip") {
+            SuggestPrefs.markSkipped(context, item.uri.toString())
+        } else {
+            SuggestPrefs.markJudged(context, item.uri.toString())
+        }
+        cards = cards.filterNot { it.item.uri == item.uri }
+        SuggestPrefs.setCards(context, cards.map { it.item.id to it.tag })
+        persist()
+        phase = if (index >= cards.size) {
+            if (queue.isNotEmpty()) "summary" else "empty"
+        } else "deck"
     }
 
     fun undo() {
@@ -342,6 +381,11 @@ private fun SuggestContent(onBack: () -> Unit) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
                         }
                     },
+                    actions = {
+                        if (phase == "deck") {
+                            ViewModeToggle(route = DECK_ID) { deckView = it }
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
                 )
                 if (phase == "deck" && cards.isNotEmpty()) {
@@ -406,18 +450,36 @@ private fun SuggestContent(onBack: () -> Unit) {
                 TextButton(onClick = onBack) { Text(stringResource(R.string.common_back_home)) }
             }
 
-            "deck" -> DeckPhase(
-                cards = cards,
-                index = index,
-                queueSize = queue.size,
-                resumedAt = resumedAt,
-                canUndo = history.isNotEmpty(),
-                onDecide = ::decide,
-                onUndo = ::undo,
-                onSkip = ::skip,
-                onPreview = { previewItem = it },
-                onPurge = { purge(queue) }
-            )
+            "deck" -> if (deckView) {
+                // H fix: full scaffold padding — the deck must measure only
+                // the visible area between top bar and buttons (same fix as
+                // the shared deck; here the phase had NO padding at all).
+                Box(modifier = Modifier.padding(padding)) {
+                    DeckPhase(
+                        cards = cards,
+                        index = index,
+                        queueSize = queue.size,
+                        resumedAt = resumedAt,
+                        canUndo = history.isNotEmpty(),
+                        onDecide = ::decide,
+                        onUndo = ::undo,
+                        onSkip = ::skip,
+                        onPreview = { previewItem = it },
+                        onPurge = { purge(queue) }
+                    )
+                }
+            } else {
+                Box(modifier = Modifier.padding(padding)) {
+                    SuggestListPhase(
+                        cards = cards,
+                        index = index,
+                        queue = queue,
+                        onDecide = ::listDecide,
+                        onPreview = { previewItem = it },
+                        onConfirm = { confirmDelete(queue) }
+                    )
+                }
+            }
 
             "summary" -> SummaryPhase(
                 queued = queue,
@@ -563,9 +625,12 @@ private fun DeckPhase(
                 .weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            // Height caps the card width (Batch F): on button-nav devices the
-            // old width-driven card rode up over the header progress bar.
-            val cardWidth = minOf(maxWidth - 48.dp, maxHeight * 0.72f - 8.dp)
+            // Height-derived sizing (Batch H — same fix as the shared deck):
+            // height first, width from the 0.72 aspect. The Batch F formula
+            // fed maxHeight*0.72 in as a WIDTH and aspectRatio turned it
+            // back into a ~full-area height.
+            val cardHeight = minOf(maxHeight - 24.dp, (maxWidth - 48.dp) / 0.72f)
+            val cardWidth = cardHeight * 0.72f
             // next cards peeking behind — identical stack to every deck
             for (depth in 2 downTo 1) {
                 val next = cards.getOrNull(index + depth)
@@ -713,3 +778,168 @@ private fun SuggestDonePhase(
         ) { Text(stringResource(R.string.common_back_home)) }
     }
 }
+
+// ───────────────────────── list mode (Batch H) ─────────────────────────
+
+/**
+ * List mode for the Suggest deal (Batch H): the same un-judged tail the
+ * deck shows (cards.drop(index)), but scannable rows with the tag chip and
+ * the reason in plain sight — for people who'd rather triage than swipe.
+ * Row actions go through [SuggestContent.listDecide] via onDecide; the
+ * queued rows carry a chip so the running total stays loud.
+ */
+@Composable
+private fun SuggestListPhase(
+    cards: List<SuggestEngine.Suggestion>,
+    index: Int,
+    queue: List<MediaItem>,
+    onDecide: (MediaItem, String) -> Unit,
+    onPreview: (MediaItem) -> Unit,
+    onConfirm: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val pending = cards.drop(index)
+    val queuedUris = queue.map { it.uri.toString() }.toSet()
+
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            stringResource(R.string.sug_list_header, pending.size),
+            fontSize = 12.sp,
+            color = cs.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().weight(1f),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(pending, key = { it.item.uri.toString() }) { s ->
+                val item = s.item
+                val queued = item.uri.toString() in queuedUris
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(cs.surface)
+                        .clickable { onPreview(item) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (item.mime.startsWith("image/") || item.mime.startsWith("video/")) {
+                        AsyncImage(
+                            model = item.uri,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(14.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(cs.surfaceVariant)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            tagLabelRes(s.tag).takeIf { it != 0 }
+                                ?.let { stringResource(it) } ?: s.tag,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = cs.onPrimaryContainer,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(cs.primaryContainer)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            s.reason,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            item.displayName + " · " +
+                                stringResource(R.string.deck_card_meta, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec))
+                                    .substringAfter("· "),
+                            fontSize = 11.sp,
+                            color = cs.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (queued) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                stringResource(R.string.list_chip_queued),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = cs.onErrorContainer,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(cs.errorContainer)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            stringResource(R.string.common_btn_keep),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = cs.tertiary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { onDecide(item, "kept") }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                        Text(
+                            if (queued) stringResource(R.string.list_unqueue)
+                            else stringResource(R.string.common_btn_clean),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = cs.error,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { onDecide(item, "queued") }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                        Text(
+                            stringResource(R.string.sug_not_today),
+                            fontSize = 11.sp,
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { onDecide(item, "skip") }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+        }
+        Button(
+            onClick = onConfirm,
+            enabled = queue.isNotEmpty(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
+                .height(48.dp),
+            shape = RoundedCornerShape(999.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = cs.errorContainer,
+                contentColor = cs.onErrorContainer
+            )
+        ) {
+            Text(
+                stringResource(R.string.list_confirm_n, queue.size, humanBytes(queue.sumOf { it.sizeBytes })),
+                fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1
+            )
+        }
+    }
+}
+

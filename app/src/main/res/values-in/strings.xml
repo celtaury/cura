@@ -446,4 +446,22 @@
         <item quantity="one">%1$d file · %2$s menunggu</item>
         <item quantity="other">%1$d file · %2$s menunggu</item>
     </plurals>
+    <!-- ── Batch H (0.9.11): fitur deck ───────────────────────────── -->
+    <string name="common_view_deck">Dek</string>
+    <string name="common_view_list">Daftar</string>
+    <string name="common_continue">Lanjutkan</string>
+    <string name="deck_burst_badge">⚡ Burst ×%1$d</string>
+    <string name="deck_burst_hint">Satu geser menilai semua %1$d</string>
+    <string name="deck_month_done_title">%1$s bersih</string>
+    <string name="deck_month_done_next">Lanjutkan ke %1$s — %2$d untuk dinilai</string>
+    <string name="deck_month_done_later">Nanti saja</string>
+    <string name="list_header_shown">%1$d ditampilkan · %2$s</string>
+    <string name="list_header_queued">%1$d diantrekan · %2$s</string>
+    <string name="list_chip_kept">Disimpan ✓</string>
+    <string name="list_chip_queued">Diantrekan ✓</string>
+    <string name="list_unqueue">Batal antre</string>
+    <string name="list_confirm_n">Bersihkan %1$d · %2$s</string>
+    <string name="sug_list_header">%1$d temuan untuk dinilai</string>
+    <string name="soc_deck_done">Semua sudah dinilai</string>
+    <string name="soc_deck_done_hint">Ganti filter, atau kembali ke daftar untuk lanjut.</string>
 </resources>

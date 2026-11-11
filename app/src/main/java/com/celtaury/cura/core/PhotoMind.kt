@@ -144,6 +144,15 @@ object PhotoMind {
     // ── burst grouping ───────────────────────────────────────────────
 
     /**
+     * Public burst grouping for the gallery deck (Batch H): the same
+     * detection the Suggest engine uses, exposed so the deck can judge a
+     * whole burst with one swipe. Only still photos group — screenshots and
+     * videos keep their individual cards.
+     */
+    fun burstGroupsOf(items: List<MediaItem>): List<List<MediaItem>> =
+        burstGroups(items.filter { it.mime.startsWith("image/") })
+
+    /**
      * Burst detection from names + timestamps alone:
      *  1. explicit burst naming — Google Camera writes "…_BURST004" (plus a
      *     "…_BURST_COVER" keeper frame);

@@ -1,6 +1,7 @@
 package com.celtaury.cura.ui.deck
 
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -8,10 +9,15 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -24,7 +30,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -48,7 +53,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -88,6 +92,7 @@ import coil.compose.AsyncImage
 import com.celtaury.cura.core.DeckPrefs
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
+import com.celtaury.cura.core.PhotoMind
 import com.celtaury.cura.core.PermissionGate
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
@@ -118,7 +123,9 @@ private data class MonthSlice(val key: String, val indexes: List<Int>)
 /** One judged card in the in-memory undo trail (newest last). */
 private data class DeckDecision(
     val item: MediaItem,
-    val action: String
+    val action: String,
+    /** Whole burst judged with one swipe (empty = a single card). */
+    val group: List<MediaItem> = emptyList()
 )
 
 /**
@@ -203,6 +210,36 @@ private fun DeckContent(
             .map { (k, idxs) -> MonthSlice(k, idxs.toList()) }
     }
 
+    // Burst groups (Batch H, gallery deck): uri → the burst it belongs to.
+    // Consecutive camera shots sharing a moment judge as ONE card — the
+    // badge on the card says how many, one swipe decides them all.
+    val burstIndex: Map<String, List<MediaItem>> = remember(items) {
+        if (route != "deck_gallery") {
+            emptyMap()
+        } else {
+            PhotoMind.burstGroupsOf(items)
+                .flatMap { g -> g.map { m -> m.uri.toString() to g } }
+                .toMap()
+        }
+    }
+
+    // Month-end gate (Batch H): the month key that was just finished, or
+    // null while no gate is showing. Set by monthGateCheck() when a
+    // decision crosses into a new month.
+    var monthGate by remember { mutableStateOf<String?>(null) }
+
+    fun monthGateCheck(judgedLast: MediaItem) {
+        val next = items.getOrNull(index) ?: return
+        if (Scanner.monthKeyOf(judgedLast.dateAddedSec) !=
+            Scanner.monthKeyOf(next.dateAddedSec)
+        ) {
+            monthGate = Scanner.monthKeyOf(judgedLast.dateAddedSec)
+        }
+    }
+
+    // List ⇄ deck view (Batch H): Large Files can be judged as rows too.
+    var deckView by remember { mutableStateOf(DeckPrefs.isDeck(context, route)) }
+
     // ── load: scanner-backed or memory-backed, then resume position + queue ──
     LaunchedEffect(route) {
         val loaded = withContext(Dispatchers.IO) {
@@ -245,15 +282,26 @@ private fun DeckContent(
         // One card, one decision per visit — a legit re-decide always passes
         // through undo() first, which pops the matching history entry.
         if (history.lastOrNull()?.item?.uri == item.uri) return
-        SuggestionEngine.observe(item, action)   // Batch 4: feed the leaf-tile brain
-        if (action == "kept") {
-            KeepSafe.add(context, item.uri)
-        } else if (queue.none { it.uri == item.uri }) {
-            queue = queue + item
+        // Burst grouping (Batch H): one swipe judges every still-pending
+        // shot of the burst the current card belongs to. All members share
+        // the verdict; undo rewinds the whole burst as one decision.
+        val burst = burstIndex[item.uri.toString()]
+            ?.filter { m -> items.indexOfFirst { it.uri == m.uri } >= index }
+            ?.sortedBy { m -> items.indexOfFirst { it.uri == m.uri } }
+            .orEmpty()
+        val members = if (burst.size > 1) burst else listOf(item)
+        for (m in members) {
+            if (m.uri != item.uri) SuggestionEngine.observe(m, action)
+            if (action == "kept") {
+                KeepSafe.add(context, m.uri)
+            } else if (queue.none { it.uri == m.uri }) {
+                queue = queue + m
+            }
         }
-        history = history + DeckDecision(item, action)
-        index += 1
+        history = history + DeckDecision(item, action, if (burst.size > 1) burst else emptyList())
+        index = members.maxOf { m -> items.indexOfFirst { it.uri == m.uri } + 1 }
         persist()
+        monthGateCheck(members.last())
         phase = if (index >= items.size) {
             if (queue.isNotEmpty()) "summary" else "empty"
         } else "deck"
@@ -265,12 +313,17 @@ private fun DeckContent(
         // newest. Tap again to step back another card. No volley grouping:
         // one action, one undo, fully predictable.
         val last = history.last()
-        if (last.action == "queued") {
-            queue = queue.filterNot { it.uri == last.item.uri }
-        } else {
-            KeepSafe.remove(context, last.item.uri)
+        // Batch H: a burst judgement is ONE decision covering every member.
+        val members = last.group.ifEmpty { listOf(last.item) }
+        for (m in members) {
+            if (last.action == "queued") {
+                queue = queue.filterNot { it.uri == m.uri }
+            } else {
+                KeepSafe.remove(context, m.uri)
+            }
         }
-        index -= 1
+        index = members.minOf { m -> items.indexOfFirst { it.uri == m.uri } }
+            .coerceAtLeast(0)
         history = history.dropLast(1)
         persist()
         phase = "deck"
@@ -339,6 +392,11 @@ private fun DeckContent(
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
+                        }
+                    },
+                    actions = {
+                        if (route == "large_files" && phase == "deck") {
+                            ViewModeToggle(route = "large_files") { deckView = it }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -425,24 +483,53 @@ private fun DeckContent(
                 }
             }
 
-            "deck" -> Box(
-                modifier = Modifier.padding(bottom = padding.calculateBottomPadding())
-            ) {
-                DeckPhase(
-                    items = items,
-                    index = index,
-                    queueSize = queue.size,
-                    resumedAt = resumedAt,
-                    canUndo = history.isNotEmpty(),
-                    onDecide = ::decide,
-                    onUndo = ::undo,
-                    onPreview = { previewItem = it },
-                    onPurge = { purge(queue) }
-                )
+            "deck" -> if (!deckView && route == "large_files") {
+                // Large Files list mode (Batch H): same queue & confirm
+                // state as the deck, scannable rows instead of the card.
+                Box(modifier = Modifier.padding(padding)) {
+                    DeckListMode(
+                        items = items,
+                        queuedUris = queue.map { it.uri.toString() }.toSet(),
+                        onKeep = { item ->
+                            KeepSafe.add(context, item.uri)
+                        },
+                        onToggleQueue = { item ->
+                            queue = if (queue.any { it.uri == item.uri }) {
+                                queue.filterNot { it.uri == item.uri }
+                            } else {
+                                queue + item
+                            }
+                            persist()
+                        },
+                        onConfirm = { confirmDelete(queue) },
+                        onPreview = { previewItem = it }
+                    )
+                }
+            } else {
+                // H fix: the deck phase applies the FULL scaffold padding —
+                // bottom-only padding let the deck measure the space behind
+                // the top bar too, so the card centered over the wrong
+                // region: it rode up under the progress bar and pooled all
+                // its slack above the buttons (0.9.10 screenshots).
+                Box(modifier = Modifier.padding(padding)) {
+                    DeckPhase(
+                        items = items,
+                        index = index,
+                        queueSize = queue.size,
+                        resumedAt = resumedAt,
+                        canUndo = history.isNotEmpty(),
+                        burstIndex = burstIndex,
+                        onSwipeUp = if (monthSlices.size > 1) ({ pickerOpen = true }) else null,
+                        onDecide = ::decide,
+                        onUndo = ::undo,
+                        onPreview = { previewItem = it },
+                        onPurge = { purge(queue) }
+                    )
+                }
             }
 
             "summary" -> Box(
-                modifier = Modifier.padding(bottom = padding.calculateBottomPadding())
+                modifier = Modifier.padding(padding)
             ) {
                 SummaryPhase(
                     queued = queue,
@@ -497,20 +584,46 @@ private fun DeckContent(
         )
     }
 
-    if (pickerOpen) {
-        MonthPickerSheet(
-            slices = monthSlices,
-            currentIndex = index,
-            currentKey = items.getOrNull(index)?.let { Scanner.monthKeyOf(it.dateAddedSec) },
-            onPick = { slice ->
-                pickerOpen = false
-                slice.indexes.filter { p -> p >= index }.minOrNull()?.let { target ->
-                    index = target
-                    persist()
+    // Month sidebar (Batch H): opens from the month pill OR a swipe UP on
+    // the card. Replaces the old bottom-sheet picker.
+    MonthSidebar(
+        visible = pickerOpen,
+        slices = monthSlices,
+        currentIndex = index,
+        currentKey = items.getOrNull(index)?.let { Scanner.monthKeyOf(it.dateAddedSec) },
+        onPick = { slice ->
+            pickerOpen = false
+            slice.indexes.filter { p -> p >= index }.minOrNull()?.let { target ->
+                index = target
+                persist()
+            }
+        },
+        onDismiss = { pickerOpen = false }
+    )
+
+    // Month-end gate (Batch H): finishing a month pauses the deck —
+    // "October is clean → continue?" — instead of silently sliding into
+    // the next one. The deck is ALREADY showing the next month's first
+    // card behind the gate; Continue just reveals it.
+    monthGate?.let { doneKey ->
+        val nextKey = items.getOrNull(index)
+            ?.let { Scanner.monthKeyOf(it.dateAddedSec) }
+        if (nextKey != null) {
+            MonthGateOverlay(
+                doneLabel = monthLabelOf(doneKey),
+                nextLabel = monthLabelOf(nextKey),
+                nextCount = items.drop(index)
+                    .takeWhile { Scanner.monthKeyOf(it.dateAddedSec) == nextKey }
+                    .size,
+                onContinue = { monthGate = null },
+                onLater = {
+                    monthGate = null
+                    onBack()
                 }
-            },
-            onDismiss = { pickerOpen = false }
-        )
+            )
+        } else {
+            monthGate = null
+        }
     }
 }
 
@@ -523,6 +636,8 @@ private fun DeckPhase(
     queueSize: Int,
     resumedAt: Int,
     canUndo: Boolean,
+    burstIndex: Map<String, List<MediaItem>> = emptyMap(),
+    onSwipeUp: (() -> Unit)? = null,
     onDecide: (MediaItem, String) -> Unit,
     onUndo: () -> Unit,
     onPreview: (MediaItem) -> Unit,
@@ -530,6 +645,14 @@ private fun DeckPhase(
 ) {
     val cs = MaterialTheme.colorScheme
     val current = items.getOrNull(index)
+    // How many shots of the current card's burst are still unjudged from
+    // here — >1 turns on the "Burst ×N" badge and group-judging.
+    val burstCount = current?.let { cur ->
+        burstIndex[cur.uri.toString()]
+            ?.count { m -> items.indexOfFirst { it.uri == m.uri } >= index }
+            ?.takeIf { it > 1 }
+            ?: 0
+    } ?: 0
 
     // Swipe side glow: -1f = card being thrown left (clean → red), +1f =
     // thrown right (keep → green). DeckCard reports drag frames and a 0f
@@ -568,11 +691,16 @@ private fun DeckPhase(
                 .weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            // Keep every card inside BOTH edges: on short screens (button
-            // navigation) a width-driven card rides up over the header's
-            // progress bar and top bar. Height caps the width; width fills
-            // the rest (Batch F — the "margin problem card").
-            val cardWidth = minOf(maxWidth - 48.dp, maxHeight * 0.72f - 8.dp)
+            // Card sizing (Batch H — reverts the Batch F rule): pick the
+            // HEIGHT first (the whole visible deck area minus breathing
+            // room) and derive the width from the 0.72 aspect. Batch F
+            // computed a width from `maxHeight * 0.72f` and let aspectRatio
+            // turn it right back into a ~full-area height — on a fullscreen
+            // phone that, plus the top padding being ignored, pushed the
+            // card over the progress bar and left a dead gap above the
+            // buttons. Height-derived sizing can never do either.
+            val cardHeight = minOf(maxHeight - 24.dp, (maxWidth - 48.dp) / 0.72f)
+            val cardWidth = cardHeight * 0.72f
             // the side being thrown toward lights up (Batch F: radial wash,
             // no more top/bottom clipping; knobs live in CuraDesign)
             DeckSideGlow(state = glowState)
@@ -608,7 +736,9 @@ private fun DeckPhase(
                         interactive = true,
                         onDecide = onDecide,
                         onPreview = onPreview,
-                        onDragProgress = { glowState.onDrag(it) }
+                        onDragProgress = { glowState.onDrag(it) },
+                        onSwipeUp = onSwipeUp,
+                        burstCount = burstCount
                     )
                 }
             }
@@ -691,11 +821,14 @@ internal fun DeckCard(
     interactive: Boolean,
     onDecide: (MediaItem, String) -> Unit,
     onPreview: (MediaItem) -> Unit,
-    onDragProgress: ((Float) -> Unit)? = null
+    onDragProgress: ((Float) -> Unit)? = null,
+    onSwipeUp: (() -> Unit)? = null,
+    burstCount: Int = 0
 ) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     val thresholdPx = with(LocalDensity.current) { 130.dp.toPx() }
+    val swipeUp = onSwipeUp
     val offsetX = remember { Animatable(0f) }
     val isVideo = item.mime.startsWith("video/")
     val isMedia = item.mime.startsWith("image/") || isVideo
@@ -743,6 +876,29 @@ internal fun DeckCard(
                     }
                 )
             }
+            .then(
+                if (swipeUp != null) {
+                    // Vertical drag alongside the judge swipe (Batch H): a
+                    // clean upward flick opens the month sidebar. The two
+                    // detectors live in separate pointerInput blocks, so
+                    // Compose routes each gesture by its dominant axis.
+                    Modifier.pointerInput(swipeUp) {
+                        var totalY = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { totalY = 0f },
+                            onVerticalDrag = { change, amount ->
+                                change.consume()
+                                totalY += amount
+                            },
+                            onDragEnd = {
+                                if (-totalY > 96.dp.toPx()) swipeUp()
+                            }
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
     } else modifier
 
     Box(cardModifier.clip(RoundedCornerShape(CuraDesign.radiusDeckCard))) {
@@ -827,6 +983,28 @@ internal fun DeckCard(
             }
             // info strip
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                if (burstCount > 1) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.deck_burst_badge, burstCount),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            color = cs.onPrimaryContainer,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(cs.primaryContainer)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.deck_burst_hint, burstCount),
+                            fontSize = 11.sp,
+                            color = cs.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
                 Text(item.displayName, maxLines = 1, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(2.dp))
                 Text(
@@ -974,11 +1152,17 @@ private fun DeckSideGlow(
     }
 }
 
-// ───────────────────────── month picker (#7) ─────────────────────────
+// ───────────────────────── month sidebar (Batch H) ─────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The deck's month navigation as a LEFT-SIDE drawer instead of a bottom
+ * sheet: opened by the month pill tap or a clean swipe UP on the card.
+ * Each row shows a month and what's left to judge there; tapping jumps to
+ * that month's first un-judged card (forward-only, like the old picker).
+ */
 @Composable
-private fun MonthPickerSheet(
+private fun MonthSidebar(
+    visible: Boolean,
     slices: List<MonthSlice>,
     currentIndex: Int,
     currentKey: String?,
@@ -986,52 +1170,138 @@ private fun MonthPickerSheet(
     onDismiss: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            Text(
-                stringResource(R.string.deck_jump_month),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
+    Box(Modifier.fillMaxSize()) {
+        AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(cs.scrim.copy(alpha = 0.45f))
+                    .pointerInput(Unit) { detectTapGestures { onDismiss() } }
             )
-            Text(
-                stringResource(R.string.deck_month_sub),
-                fontSize = 12.sp,
-                color = cs.onSurfaceVariant
-            )
-            Spacer(Modifier.height(10.dp))
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(slices, key = { it.key }) { slice ->
-                    val left = slice.indexes.count { p -> p >= currentIndex }
-                    val isCurrent = slice.key == currentKey
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isCurrent) cs.primaryContainer else Color.Transparent)
-                            .clickable(enabled = left > 0 && !isCurrent) { onPick(slice) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+        }
+        AnimatedVisibility(
+            visible = visible,
+            enter = slideInHorizontally { -it } + fadeIn(),
+            exit = slideOutHorizontally { -it } + fadeOut()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(300.dp)
+                    .background(cs.surface)
+                    .padding(20.dp)
+            ) {
+                Text(
+                    stringResource(R.string.deck_jump_month),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    stringResource(R.string.deck_month_sub),
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                LazyColumn(Modifier.fillMaxHeight()) {
+                    items(slices, key = { it.key }) { slice ->
+                        val left = slice.indexes.count { p -> p >= currentIndex }
+                        val isCurrent = slice.key == currentKey
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isCurrent) cs.primaryContainer else Color.Transparent)
+                                .clickable(enabled = left > 0 && !isCurrent) { onPick(slice) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                monthLabelOf(slice.key),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                when {
+                                    isCurrent -> stringResource(R.string.deck_here)
+                                    left > 0 -> stringResource(R.string.deck_n_to_judge, left)
+                                    else -> stringResource(R.string.deck_judged)
+                                },
+                                fontSize = 12.sp,
+                                color = if (left > 0 && !isCurrent) cs.primary else cs.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Month-end gate (Batch H): the moment the last card of a month is judged
+ * and cards from a NEW month wait behind it, the deck stops and asks —
+ * "October is clean → continue with November?" — instead of silently
+ * sliding into the next month. [Continue] reveals the next month in place;
+ * the escape hatch leaves the deck (position + queue are already saved).
+ */
+@Composable
+private fun MonthGateOverlay(
+    doneLabel: String,
+    nextLabel: String,
+    nextCount: Int,
+    onContinue: () -> Unit,
+    onLater: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    Dialog(
+        onDismissRequest = onContinue,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(cs.scrim.copy(alpha = 0.6f))
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(26.dp),
+                colors = CardDefaults.cardColors(containerColor = cs.surface)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(24.dp)) {
+                    Text("🌿", fontSize = 44.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        stringResource(R.string.deck_month_done_title, doneLabel),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.deck_month_done_next, nextLabel, nextCount),
+                        fontSize = 15.sp,
+                        color = cs.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = onContinue,
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = MaterialTheme.shapes.large
+                    ) { Text(stringResource(R.string.common_continue), fontWeight = FontWeight.Bold) }
+                    TextButton(
+                        onClick = onLater,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
                         Text(
-                            monthLabelOf(slice.key),
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            when {
-                                isCurrent -> stringResource(R.string.deck_here)
-                                left > 0 -> stringResource(R.string.deck_n_to_judge, left)
-                                else -> stringResource(R.string.deck_judged)
-                            },
-                            fontSize = 12.sp,
-                            color = if (left > 0 && !isCurrent) cs.primary else cs.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold
+                            stringResource(R.string.deck_month_done_later),
+                            color = cs.onSurfaceVariant
                         )
                     }
                 }
             }
-            Spacer(Modifier.height(20.dp))
         }
     }
 }

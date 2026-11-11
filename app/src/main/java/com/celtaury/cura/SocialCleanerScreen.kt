@@ -17,10 +17,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,6 +67,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,15 +80,18 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.DeleteQueuePrefs
+import com.celtaury.cura.core.DeckPrefs
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.PermissionGate
@@ -95,6 +101,8 @@ import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
+import com.celtaury.cura.ui.deck.DeckCard
+import com.celtaury.cura.ui.deck.ViewModeToggle
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import com.celtaury.cura.ui.theme.InterBlack
 import kotlinx.coroutines.Dispatchers
@@ -157,6 +165,14 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
     // Resolved at composition for non-composable callbacks (snackbar labels).
     val undoLabel = stringResource(R.string.common_btn_undo)
 
+    // List ⇄ deck view (Batch H) + deck cursor state. The cursor never
+    // advances by hand: every judgement removes the current card from the
+    // pool (keep → the item leaves `items`; clean → the uri joins
+    // deckJudged), so the next card slides into place on its own.
+    var deckView by remember { mutableStateOf(DeckPrefs.isDeck(context, "social")) }
+    var deckCursor by remember { mutableStateOf(0) }
+    var deckJudged by remember { mutableStateOf(setOf<String>()) }
+
     LaunchedEffect(Unit) {
         items = withContext(Dispatchers.IO) {
             Scanner.whatsappMedia(context)
@@ -167,6 +183,11 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
     // Persist delete queue so selections survive app exits
     LaunchedEffect(queuedUris) {
         DeleteQueuePrefs.setQueue(context, "social", queuedUris)
+    }
+
+    // Batch H: a different type filter re-deals the deck.
+    LaunchedEffect(selectedType) {
+        deckCursor = 0
     }
 
     // ── Keep Safe undo, volley edition ──
@@ -305,6 +326,11 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
+                    }
+                },
+                actions = {
+                    if (!loading && items.isNotEmpty()) {
+                        ViewModeToggle(route = "social") { deckView = it }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = cs.background)
@@ -460,7 +486,8 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
 
                         Spacer(Modifier.height(12.dp))
 
-                        // ── Items List with Swipe Left to Queue Delete / Right to Save ──
+                        // ── Items list (list mode): swipe left queue / right save ──
+                        if (!deckView) {
                         LazyColumn(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -624,6 +651,89 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        }
+                        } else {
+                            // ── Deck mode (Batch H): judge this tab as cards —
+                            // same height-derived sizing as every deck.
+                            BoxWithConstraints(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val cardHeight = minOf(maxHeight - 24.dp, (maxWidth - 48.dp) / 0.72f)
+                                val deckCardWidth = cardHeight * 0.72f
+                                val deckItems = displayedItems.filter { it.uri.toString() !in deckJudged }
+                                val currentCard = deckItems.getOrNull(deckCursor)
+                                if (currentCard == null) {
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text("✨", fontSize = 44.sp)
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            stringResource(R.string.soc_deck_done),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            stringResource(R.string.soc_deck_done_hint),
+                                            fontSize = 12.sp,
+                                            color = cs.onSurfaceVariant,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                } else {
+                                    // next two peeking behind — same stack as every deck
+                                    for (depth in 2 downTo 1) {
+                                        val next = deckItems.getOrNull(deckCursor + depth)
+                                        if (next != null) {
+                                            DeckCard(
+                                                item = next,
+                                                modifier = Modifier
+                                                    .width(deckCardWidth)
+                                                    .aspectRatio(0.72f)
+                                                    .graphicsLayer {
+                                                        val shrink = 1f - 0.05f * depth
+                                                        scaleX = shrink
+                                                        scaleY = shrink
+                                                        translationY = 40f * depth
+                                                        alpha = 1f - 0.25f * depth
+                                                    },
+                                                interactive = false,
+                                                onDecide = { _, _ -> },
+                                                onPreview = { previewItem = it }
+                                            )
+                                        }
+                                    }
+                                    key(currentCard.uri) {
+                                        DeckCard(
+                                            item = currentCard,
+                                            modifier = Modifier
+                                                .width(deckCardWidth)
+                                                .aspectRatio(0.72f),
+                                            interactive = true,
+                                            onDecide = { item, action ->
+                                                if (action == "kept") {
+                                                    // keepItemSafe drops the item from the
+                                                    // pool itself; the volley-undo snackbar
+                                                    // still rolls it back into place
+                                                    keepItemSafe(item)
+                                                } else {
+                                                    // the card leaves the deck by joining the
+                                                    // judged set; the action bar's
+                                                    // Delete-selected button purges it
+                                                    deckJudged = deckJudged + item.uri.toString()
+                                                    queuedUris = queuedUris + item.uri.toString()
+                                                }
+                                            },
+                                            onPreview = { previewItem = it }
+                                        )
                                     }
                                 }
                             }
