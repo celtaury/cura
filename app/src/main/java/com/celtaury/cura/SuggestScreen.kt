@@ -75,6 +75,7 @@ import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.deck.DeckCard
+import com.celtaury.cura.ui.deck.SwipeActionItem
 import com.celtaury.cura.ui.deck.SummaryPhase
 import com.celtaury.cura.ui.deck.ViewModeToggle
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
@@ -105,7 +106,6 @@ private const val DECK_ID = "suggest"
 @StringRes
 private fun tagLabelRes(tag: String): Int = when (tag) {
     "Old screenshot" -> R.string.tag_old_screenshot
-    "Empty file" -> R.string.tag_empty_file
     "Duplicate" -> R.string.tag_duplicate
     "Stray installer" -> R.string.tag_stray_installer
     "Old photo" -> R.string.tag_old_photo
@@ -356,23 +356,22 @@ private fun SuggestContent(onBack: () -> Unit) {
                 TopAppBar(
                     title = {
                         Column {
-                            // Batch F: the header says WHY — the current
-                            // card's finding type replaces the static title
-                            // while a deck is open (user report).
+                            // Batch K (user ask): the title always says
+                            // "Suggested" — the REASON belongs in the
+                            // subtitle, where it reads as context, not as
+                            // a screen name that keeps changing.
+                            Text(stringResource(R.string.sug_title), fontWeight = FontWeight.Bold)
                             val currentCard = cards.getOrNull(index)
-                            val why = currentCard?.let { s ->
+                            val why = if (phase == "deck") currentCard?.let { s ->
                                 tagLabelRes(s.tag).takeIf { it != 0 }
-                                    ?.let { stringResource(it) }
-                            }
+                                    ?.let { stringResource(it) } ?: s.tag
+                            } else null
                             Text(
-                                if (phase == "deck" && why != null) why
-                                else stringResource(R.string.sug_title),
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                stringResource(R.string.sug_sub),
+                                why ?: stringResource(R.string.sug_sub),
                                 fontSize = 12.sp,
-                                color = cs.onSurfaceVariant
+                                color = cs.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     },
@@ -585,39 +584,9 @@ private fun DeckPhase(
         }
         Spacer(Modifier.height(6.dp))
 
-        // ── the reason banner: leads with WHY, not WHAT ──
-        current?.let { s ->
-            val chipLabel = tagLabelRes(s.tag).takeIf { it != 0 }
-                ?.let { stringResource(it) } ?: s.tag
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    chipLabel.uppercase(),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    color = cs.onPrimaryContainer,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(cs.primaryContainer)
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    s.reason,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = cs.onBackground,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-        Spacer(Modifier.height(10.dp))
+        // Batch K: the floating reason banner is gone — the tag pill and the
+        // reason now ride ON the card itself (DeckCard badge), so the WHY is
+        // glued to the photo it explains instead of hovering above the deck.
 
         BoxWithConstraints(
             modifier = Modifier
@@ -662,7 +631,10 @@ private fun DeckPhase(
                             .aspectRatio(0.72f),
                         interactive = true,
                         onDecide = onDecide,
-                        onPreview = onPreview
+                        onPreview = onPreview,
+                        badgeLabel = tagLabelRes(current.tag).takeIf { it != 0 }
+                            ?.let { stringResource(it) } ?: current.tag,
+                        badgeReason = current.reason
                     )
                 }
             }
@@ -674,18 +646,8 @@ private fun DeckPhase(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Button(
-                onClick = { current?.let { onDecide(it.item, "kept") } },
-                modifier = Modifier.weight(1f).height(54.dp),
-                shape = MaterialTheme.shapes.large,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = cs.tertiaryContainer,
-                    contentColor = cs.onTertiaryContainer
-                )
-            ) { Text(stringResource(R.string.common_btn_keep), fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onUndo, enabled = canUndo && index > 0) {
-                Text(stringResource(R.string.common_btn_undo))
-            }
+            // Batch K: Clean LEFT, Keep RIGHT — same swap as every deck, so
+            // the buttons finally match the gestures (left = clean).
             Button(
                 onClick = { current?.let { onDecide(it.item, "queued") } },
                 modifier = Modifier.weight(1f).height(54.dp),
@@ -695,14 +657,19 @@ private fun DeckPhase(
                     contentColor = cs.onErrorContainer
                 )
             ) { Text(stringResource(R.string.common_btn_clean), fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onUndo, enabled = canUndo && index > 0) {
+                Text(stringResource(R.string.common_btn_undo))
+            }
+            Button(
+                onClick = { current?.let { onDecide(it.item, "kept") } },
+                modifier = Modifier.weight(1f).height(54.dp),
+                shape = MaterialTheme.shapes.large,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = cs.tertiaryContainer,
+                    contentColor = cs.onTertiaryContainer
+                )
+            ) { Text(stringResource(R.string.common_btn_keep), fontWeight = FontWeight.Bold) }
         }
-        Text(
-            stringResource(R.string.common_swipe_hint),
-            fontSize = 11.sp,
-            color = cs.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-        )
         TextButton(
             onClick = { current?.let { onSkip(it.item) } },
             modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -784,9 +751,10 @@ private fun SuggestDonePhase(
 /**
  * List mode for the Suggest deal (Batch H): the same un-judged tail the
  * deck shows (cards.drop(index)), but scannable rows with the tag chip and
- * the reason in plain sight — for people who'd rather triage than swipe.
- * Row actions go through [SuggestContent.listDecide] via onDecide; the
- * queued rows carry a chip so the running total stays loud.
+ * the reason in plain sight. Batch K: rows judge with THE shared gesture
+ * ([SwipeActionItem]) - swipe left queues, swipe right keeps, tap previews -
+ * exactly like the Social Cleaner. No more tap-pill menu per row; "Not
+ * today" stays a deck-mode action.
  */
 @Composable
 private fun SuggestListPhase(
@@ -816,108 +784,82 @@ private fun SuggestListPhase(
             items(pending, key = { it.item.uri.toString() }) { s ->
                 val item = s.item
                 val queued = item.uri.toString() in queuedUris
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(cs.surface)
-                        .clickable { onPreview(item) }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                SwipeActionItem(
+                    isQueued = queued,
+                    onSwipeLeft = { onDecide(item, "queued") },
+                    onSwipeRight = { onDecide(item, "kept") }
                 ) {
-                    if (item.mime.startsWith("image/") || item.mime.startsWith("video/")) {
-                        AsyncImage(
-                            model = item.uri,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(14.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(cs.surfaceVariant)
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            tagLabelRes(s.tag).takeIf { it != 0 }
-                                ?.let { stringResource(it) } ?: s.tag,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            color = cs.onPrimaryContainer,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(cs.primaryContainer)
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            s.reason,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            item.displayName + " · " +
-                                stringResource(R.string.deck_card_meta, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec))
-                                    .substringAfter("· "),
-                            fontSize = 11.sp,
-                            color = cs.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (queued) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                stringResource(R.string.list_chip_queued),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Black,
-                                color = cs.onErrorContainer,
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(cs.surface)
+                            .clickable { onPreview(item) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (item.mime.startsWith("image/") || item.mime.startsWith("video/")) {
+                            AsyncImage(
+                                model = item.uri,
+                                contentDescription = null,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(cs.errorContainer)
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(14.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(cs.surfaceVariant)
                             )
                         }
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            stringResource(R.string.common_btn_keep),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = cs.tertiary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .clickable { onDecide(item, "kept") }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                        Text(
-                            if (queued) stringResource(R.string.list_unqueue)
-                            else stringResource(R.string.common_btn_clean),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = cs.error,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .clickable { onDecide(item, "queued") }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                        Text(
-                            stringResource(R.string.sug_not_today),
-                            fontSize = 11.sp,
-                            color = cs.onSurfaceVariant,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .clickable { onDecide(item, "skip") }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                tagLabelRes(s.tag).takeIf { it != 0 }
+                                    ?.let { stringResource(it) } ?: s.tag,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                color = cs.onPrimaryContainer,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(cs.primaryContainer)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                s.reason,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                item.displayName + " · " +
+                                    stringResource(R.string.deck_card_meta, humanBytes(item.sizeBytes), relativeDays(item.dateAddedSec))
+                                        .substringAfter("· "),
+                                fontSize = 11.sp,
+                                color = cs.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (queued) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    stringResource(R.string.list_chip_queued),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = cs.onErrorContainer,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(cs.errorContainer)
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

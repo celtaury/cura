@@ -13,7 +13,7 @@ import com.celtaury.cura.R
  * months ago"), never by a category. Categories stay in Quick Clean; this
  * screen is the friendly nudge, not the janitor.
  *
- * Ranking: empty files & duplicates argue for themselves, then the Batch E
+ * Ranking: duplicates argue for themselves, then the Batch E
  * photo-mind verdicts (burst extras, blurry shots, plain screenshots,
  * scanned documents), then dusty screenshots, forgotten installers, old
  * media. A family contributes at most [MAX_PER_FAMILY] cards so the deck
@@ -30,7 +30,7 @@ object SuggestEngine {
 
     data class Suggestion(
         val item: MediaItem,
-        val tag: String,      // "Old screenshot" · "Empty file" · "Duplicate" · "Stray installer" · "Old photo" · v2: "Burst extra" · "Blurry photo" · "Plain screenshot" · "Scanned document"
+        val tag: String,      // "Old screenshot" · "Duplicate" · "Stray installer" · "Old photo" · v2: "Burst extra" · "Blurry photo" · "Plain screenshot" · "Scanned document"
         val reason: String,   // the line that leads the card
         val score: Int
     )
@@ -52,11 +52,6 @@ object SuggestEngine {
 
     /** The reason line for a card — single source of truth (build + restore). */
     fun reasonFor(context: Context, item: MediaItem, tag: String): String = when (tag) {
-        "Empty file" ->
-            context.getString(
-                if (item.mime.startsWith("audio/")) R.string.eng_empty_audio
-                else R.string.eng_empty_other
-            )
         "Duplicate" ->
             context.getString(R.string.eng_duplicate)
         "Burst extra" ->
@@ -100,12 +95,13 @@ object SuggestEngine {
             return uri !in judged && !KeepSafe.contains(context, item.uri)
         }
 
-        // one pool, each source arguing with its own reason
+        // one pool, each source arguing with its own reason.
+        // Batch K: the "Empty file" family is gone — zero-byte files turned
+        // out to be impossible to actually delete through MediaStore on many
+        // devices (the system dialog silently failed), so the whole feature
+        // was retired instead of shipping a dead end.
         val pool = mutableListOf<Suggestion>()
 
-        Scanner.emptyFiles(context).filter(::viable).forEach {
-            pool += Suggestion(it, "Empty file", reasonFor(context, it, "Empty file"), 6)
-        }
         Scanner.duplicateImages(context).filter(::viable).forEach {
             pool += Suggestion(it, "Duplicate", reasonFor(context, it, "Duplicate"), 5)
         }
@@ -136,7 +132,7 @@ object SuggestEngine {
             pool += Suggestion(it, "Old photo", reasonFor(context, it, "Old photo"), 3)
         }
 
-        // dedupe by uri — a 0-byte screenshot is both empty AND old; keep the
+        // dedupe by uri — a file that lands in two scans keeps the
         // sharper reason (higher score wins)
         val byUri = LinkedHashMap<String, Suggestion>()
         for (s in pool.sortedByDescending { it.score }) {

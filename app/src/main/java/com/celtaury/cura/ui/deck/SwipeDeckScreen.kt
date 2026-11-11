@@ -1,7 +1,6 @@
 package com.celtaury.cura.ui.deck
 
 import android.content.Context
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -9,10 +8,6 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -26,7 +21,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Button
@@ -84,6 +79,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -116,9 +112,6 @@ private class DeckSpec(
     val subtitleRes: Int,
     val loader: (suspend (Context) -> List<MediaItem>)? = null
 )
-
-/** One calendar month inside a deck: its key and where its cards live. */
-private data class MonthSlice(val key: String, val indexes: List<Int>)
 
 /** One judged card in the in-memory undo trail (newest last). */
 private data class DeckDecision(
@@ -201,10 +194,13 @@ private fun DeckContent(
     var pickerOpen by remember { mutableStateOf(false) }
 
     // Per-month slices of the deck (#7): month key → where its cards live.
+    // Batch I: keyed by CAPTURE month (monthKeyOf(item)) — DATE_ADDED is the
+    // copy day on migrated libraries and collapsed every file into one
+    // bucket, which hid the picker and disabled swipe-up entirely.
     val monthSlices = remember(items) {
         val byKey = LinkedHashMap<String, MutableList<Int>>()
         items.forEachIndexed { i, m ->
-            byKey.getOrPut(Scanner.monthKeyOf(m.dateAddedSec)) { mutableListOf() }.add(i)
+            byKey.getOrPut(Scanner.monthKeyOf(m)) { mutableListOf() }.add(i)
         }
         byKey.entries.sortedBy { it.key }
             .map { (k, idxs) -> MonthSlice(k, idxs.toList()) }
@@ -230,10 +226,10 @@ private fun DeckContent(
 
     fun monthGateCheck(judgedLast: MediaItem) {
         val next = items.getOrNull(index) ?: return
-        if (Scanner.monthKeyOf(judgedLast.dateAddedSec) !=
-            Scanner.monthKeyOf(next.dateAddedSec)
+        if (Scanner.monthKeyOf(judgedLast) !=
+            Scanner.monthKeyOf(next)
         ) {
-            monthGate = Scanner.monthKeyOf(judgedLast.dateAddedSec)
+            monthGate = Scanner.monthKeyOf(judgedLast)
         }
     }
 
@@ -395,6 +391,17 @@ private fun DeckContent(
                         }
                     },
                     actions = {
+                        // Batch I: month picking must ALWAYS be reachable in
+                        // the swipe-up deck — the calendar button sits in the
+                        // top bar beside the pill and the swipe-up gesture.
+                        if (phase == "deck" && monthSlices.size > 1) {
+                            IconButton(onClick = { pickerOpen = true }) {
+                                Icon(
+                                    Icons.Default.CalendarMonth,
+                                    contentDescription = stringResource(R.string.deck_jump_month)
+                                )
+                            }
+                        }
                         if (route == "large_files" && phase == "deck") {
                             ViewModeToggle(route = "large_files") { deckView = it }
                         }
@@ -425,7 +432,7 @@ private fun DeckContent(
                     }
                     if (monthSlices.size > 1) {
                         val curKey = items.getOrNull(index)
-                            ?.let { Scanner.monthKeyOf(it.dateAddedSec) }
+                            ?.let { Scanner.monthKeyOf(it) }
                         val curSlice = monthSlices.firstOrNull { s -> s.key == curKey }
                         val curLeft = curSlice?.indexes?.count { p -> p >= index } ?: 0
                         val curLabel = curSlice?.let { s -> monthLabelOf(s.key) } ?: ""
@@ -590,10 +597,18 @@ private fun DeckContent(
         visible = pickerOpen,
         slices = monthSlices,
         currentIndex = index,
-        currentKey = items.getOrNull(index)?.let { Scanner.monthKeyOf(it.dateAddedSec) },
+        currentKey = items.getOrNull(index)?.let { Scanner.monthKeyOf(it) },
         onPick = { slice ->
             pickerOpen = false
-            slice.indexes.filter { p -> p >= index }.minOrNull()?.let { target ->
+            // Batch I: month picking that actually PICKS — forward to the
+            // first un-judged card of a month ahead, or BACKWARD into a
+            // month already passed (skipped months were untappable before:
+            // the sidebar confused "behind the cursor" with "judged").
+            // Cards from the new cursor forward become live again; the
+            // purge queue and the undo trail survive untouched.
+            val target = slice.indexes.filter { p -> p >= index }.minOrNull()
+                ?: slice.indexes.first()
+            if (target != index) {
                 index = target
                 persist()
             }
@@ -607,13 +622,13 @@ private fun DeckContent(
     // card behind the gate; Continue just reveals it.
     monthGate?.let { doneKey ->
         val nextKey = items.getOrNull(index)
-            ?.let { Scanner.monthKeyOf(it.dateAddedSec) }
+            ?.let { Scanner.monthKeyOf(it) }
         if (nextKey != null) {
             MonthGateOverlay(
                 doneLabel = monthLabelOf(doneKey),
                 nextLabel = monthLabelOf(nextKey),
                 nextCount = items.drop(index)
-                    .takeWhile { Scanner.monthKeyOf(it.dateAddedSec) == nextKey }
+                    .takeWhile { Scanner.monthKeyOf(it) == nextKey }
                     .size,
                 onContinue = { monthGate = null },
                 onLater = {
@@ -750,18 +765,9 @@ private fun DeckPhase(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Button(
-                onClick = { current?.let { onDecide(it, "kept") } },
-                modifier = Modifier.weight(1f).height(54.dp),
-                shape = MaterialTheme.shapes.large,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = cs.tertiaryContainer,
-                    contentColor = cs.onTertiaryContainer
-                )
-            ) { Text(stringResource(R.string.common_btn_keep), fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onUndo, enabled = canUndo) {
-                Text(stringResource(R.string.common_btn_undo))
-            }
+            // Batch K: Clean now sits LEFT and Keep RIGHT — the buttons finally
+            // match the gestures they mirror (swipe left = clean, swipe right =
+            // keep) instead of fighting them.
             Button(
                 onClick = { current?.let { onDecide(it, "queued") } },
                 modifier = Modifier.weight(1f).height(54.dp),
@@ -771,6 +777,18 @@ private fun DeckPhase(
                     contentColor = cs.onErrorContainer
                 )
             ) { Text(stringResource(R.string.common_btn_clean), fontWeight = FontWeight.Bold) }
+            TextButton(onClick = onUndo, enabled = canUndo) {
+                Text(stringResource(R.string.common_btn_undo))
+            }
+            Button(
+                onClick = { current?.let { onDecide(it, "kept") } },
+                modifier = Modifier.weight(1f).height(54.dp),
+                shape = MaterialTheme.shapes.large,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = cs.tertiaryContainer,
+                    contentColor = cs.onTertiaryContainer
+                )
+            ) { Text(stringResource(R.string.common_btn_keep), fontWeight = FontWeight.Bold) }
         }
         // thumb-zone purge CTA — pulses when the queue grows
         if (queueSize > 0) {
@@ -800,17 +818,9 @@ private fun DeckPhase(
                 }
             }
         }
-        // Gesture legend only for fresh decks — once something is queued the
-        // pill takes over as the single call to action, so it stays unmissable.
-        if (queueSize == 0) {
-            Text(
-                stringResource(R.string.common_swipe_hint),
-                fontSize = 11.sp,
-                color = cs.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp)
-            )
-        }
+        // Batch K: the "swipe right 🛡️ … " legend is gone — the deck reads
+        // clean and minimal, and the first-run coach marks (Batch C) remain
+        // the tutor that teaches the gestures.
     }
 }
 
@@ -823,7 +833,12 @@ internal fun DeckCard(
     onPreview: (MediaItem) -> Unit,
     onDragProgress: ((Float) -> Unit)? = null,
     onSwipeUp: (() -> Unit)? = null,
-    burstCount: Int = 0
+    burstCount: Int = 0,
+    // Batch K (Suggest redesign): the WHY rides ON the card — a colored tag
+    // pill plus the engine's one-line reason, rendered in the info strip.
+    // Null for every other deck, which keeps their info strips unchanged.
+    badgeLabel: String? = null,
+    badgeReason: String? = null
 ) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -983,6 +998,30 @@ internal fun DeckCard(
             }
             // info strip
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                if (badgeLabel != null) {
+                    Text(
+                        badgeLabel.uppercase(),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        color = cs.onPrimaryContainer,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(cs.primaryContainer)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                    if (badgeReason != null) {
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            badgeReason,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = cs.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.height(7.dp))
+                }
                 if (burstCount > 1) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -1100,13 +1139,24 @@ private fun DeckSideGlow(
     modifier: Modifier = Modifier
 ) {
     var display by remember { mutableFloatStateOf(0f) }
+    // Batch K bugfix (user report: the green/red wash "still persists after I
+    // swipe left/right"): the old fade condition compared releaseTick against
+    // dragTick — but dragTick increments EVERY drag frame (dozens per swipe),
+    // while releaseTick grows by one. `releaseTick > dragTick` could only be
+    // true for a zero-frame drag, so the fade branch never ran and the else
+    // branch just re-pinned display at the last drag value: the glow froze
+    // fully lit until the next drag. Releases are now tracked against a
+    // seen-release counter instead, which only ever moves here.
+    var seenRelease by remember { mutableIntStateOf(0) }
     LaunchedEffect(state.dragTick, state.releaseTick) {
-        if (state.releaseTick > state.dragTick) {
+        if (state.releaseTick > seenRelease) {
+            seenRelease = state.releaseTick
             animate(
                 initialValue = state.releaseStart,
                 targetValue = 0f,
                 animationSpec = tween(CuraDesign.glowFadeMs, easing = FastOutSlowInEasing)
             ) { value, _ -> display = value }
+            display = 0f   // guarantee a clean zero even if the tween is cut short
         } else {
             display = state.dragValue
         }
@@ -1152,92 +1202,11 @@ private fun DeckSideGlow(
     }
 }
 
-// ───────────────────────── month sidebar (Batch H) ─────────────────────────
-
-/**
- * The deck's month navigation as a LEFT-SIDE drawer instead of a bottom
- * sheet: opened by the month pill tap or a clean swipe UP on the card.
- * Each row shows a month and what's left to judge there; tapping jumps to
- * that month's first un-judged card (forward-only, like the old picker).
- */
-@Composable
-private fun MonthSidebar(
-    visible: Boolean,
-    slices: List<MonthSlice>,
-    currentIndex: Int,
-    currentKey: String?,
-    onPick: (MonthSlice) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val cs = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxSize()) {
-        AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(cs.scrim.copy(alpha = 0.45f))
-                    .pointerInput(Unit) { detectTapGestures { onDismiss() } }
-            )
-        }
-        AnimatedVisibility(
-            visible = visible,
-            enter = slideInHorizontally { -it } + fadeIn(),
-            exit = slideOutHorizontally { -it } + fadeOut()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(300.dp)
-                    .background(cs.surface)
-                    .padding(20.dp)
-            ) {
-                Text(
-                    stringResource(R.string.deck_jump_month),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    stringResource(R.string.deck_month_sub),
-                    fontSize = 12.sp,
-                    color = cs.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-                LazyColumn(Modifier.fillMaxHeight()) {
-                    items(slices, key = { it.key }) { slice ->
-                        val left = slice.indexes.count { p -> p >= currentIndex }
-                        val isCurrent = slice.key == currentKey
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isCurrent) cs.primaryContainer else Color.Transparent)
-                                .clickable(enabled = left > 0 && !isCurrent) { onPick(slice) }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                monthLabelOf(slice.key),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                when {
-                                    isCurrent -> stringResource(R.string.deck_here)
-                                    left > 0 -> stringResource(R.string.deck_n_to_judge, left)
-                                    else -> stringResource(R.string.deck_judged)
-                                },
-                                fontSize = 12.sp,
-                                color = if (left > 0 && !isCurrent) cs.primary else cs.onSurfaceVariant,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+// ───────────────────────── month sidebar ─────────────────────────
+// Batch K: MonthSidebar + MonthSlice moved to ui/deck/MonthSidebar.kt so
+// Browse Gallery opens the SAME picker ("use the month pick everywhere").
+// The deck keeps all three openers: month pill tap, top-bar calendar
+// button, swipe UP on the card.
 
 /**
  * Month-end gate (Batch H): the moment the last card of a month is judged

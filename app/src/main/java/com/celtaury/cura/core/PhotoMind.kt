@@ -47,6 +47,7 @@ object PhotoMind {
 
     private const val BURST_MIN_GROUP = 3                   // fewer shots = a photo, not a burst
     private const val BURST_WINDOW_SEC = 15L                // burst frames share a moment
+    private const val BURST_GAP_SEC = 2L                    // consecutive burst frames sit THIS close together (Batch K)
 
     /** Filename hints that scream "scanned paper" — free, no decode needed. */
     private val DOC_NAME_HINT = Regex("scan|receipt|kuitansi|dokumen|document|nota")
@@ -101,7 +102,7 @@ object PhotoMind {
         val candidates = all.asSequence()
             .filter { it.uri.toString() !in claimed }
             .filter { it.sizeBytes >= MIN_ANALYZE_BYTES && it.sizeBytes <= MAX_FILE_BYTES }
-            .sortedBy { it.dateAddedSec }
+            .sortedBy { Scanner.captureSecOf(it) }
             .take(MAX_ANALYZE)
             .toList()
 
@@ -120,7 +121,7 @@ object PhotoMind {
                 item.sizeBytes >= BLURRY_MIN_BYTES
             ) blurry += item
             if (verdict.boring && shot &&
-                item.dateAddedSec <= System.currentTimeMillis() / 1000 - BORING_MIN_AGE_DAYS * 86400L
+                Scanner.captureSecOf(item) <= System.currentTimeMillis() / 1000 - BORING_MIN_AGE_DAYS * 86400L
             ) boringShots += item
             if (verdict.document && !shot) documents += item
         }
@@ -147,29 +148,54 @@ object PhotoMind {
      * Public burst grouping for the gallery deck (Batch H): the same
      * detection the Suggest engine uses, exposed so the deck can judge a
      * whole burst with one swipe. Only still photos group — screenshots and
-     * videos keep their individual cards.
+     * videos keep their individual cards. Batch K: overlapping detections
+     * are resolved by first claim (largest group wins) so a file can never
+     * sit in two bursts — that used to corrupt the group-judge index.
      */
-    fun burstGroupsOf(items: List<MediaItem>): List<List<MediaItem>> =
-        burstGroups(items.filter { it.mime.startsWith("image/") })
+    fun burstGroupsOf(items: List<MediaItem>): List<List<MediaItem>> {
+        val seen = HashSet<String>()
+        val out = mutableListOf<List<MediaItem>>()
+        for (group in burstGroups(items.filter { it.mime.startsWith("image/") })
+            .sortedByDescending { it.size }
+        ) {
+            val fresh = group.filter { it.uri.toString() !in seen }
+            if (fresh.size >= BURST_MIN_GROUP) {
+                fresh.forEach { seen += it.uri.toString() }
+                out += fresh
+            }
+        }
+        return out
+    }
 
     /**
-     * Burst detection from names + timestamps alone:
+     * Burst detection, three signals (Batch K rewrote #3):
      *  1. explicit burst naming — Google Camera writes "…_BURST004" (plus a
      *     "…_BURST_COVER" keeper frame);
      *  2. numeric-tail naming — ≥[BURST_MIN_GROUP] same-folder files sharing
      *     a base name with a short numeric tail, all within the window.
+     *  3. time-gap clustering — the reason the user kept seeing ungrouped
+     *     bursts: modern cameras name frames however they like (Pixel
+     *     "PXL_…jpg", Samsung date-time names, editors that rewrite names on
+     *     export), so rules 1–2 only ever caught one vendor. Real burst
+     *     frames share physics: same camera folder, consecutive capture
+     *     times ≤[BURST_GAP_SEC] apart. ≥[BURST_MIN_GROUP] such frames in a
+     *     chain = one burst. Restricted to camera folders (DCIM/Camera) so a
+     *     batch of WhatsApp/Telegram downloads — which share one DATE_ADDED
+     *     instant — can never fuse into a fake mega-burst.
      * Screenshots stay out — they have their own families.
      */
     private fun burstGroups(all: List<MediaItem>): List<List<MediaItem>> {
         val photos = all.filter { !Scanner.isScreenshotLike(it) }
         val groups = mutableListOf<List<MediaItem>>()
-        for ((_, files) in photos.groupBy { it.path.substringBeforeLast('/') }) {
+        for ((folder, files) in photos.groupBy { it.path.substringBeforeLast('/') }) {
             // 1. explicit BURST marks
             val marked = files.filter { BURST_MARK.containsMatchIn(it.displayName) }
             for ((_, run) in marked.groupBy { baseOfBurstName(it.displayName) }) {
                 if (run.size >= BURST_MIN_GROUP) groups += run
             }
-            // 2. numeric tails within one moment
+            // 2. numeric tails within one moment — the moment is CAPTURE
+            // time (Batch I): a bulk-migrated library shares one DATE_ADDED
+            // instant, which once fused separate shots into mega-bursts
             val tailed = files.filter { !BURST_MARK.containsMatchIn(it.displayName) }
                 .mapNotNull { f ->
                     val stem = f.displayName.substringBeforeLast('.', f.displayName)
@@ -178,9 +204,31 @@ object PhotoMind {
                 .groupBy({ it.first }, { it.second })
                 .filterValues { g ->
                     g.size >= BURST_MIN_GROUP &&
-                        g.maxOf { it.dateAddedSec } - g.minOf { it.dateAddedSec } <= BURST_WINDOW_SEC
+                        g.maxOf { Scanner.captureSecOf(it) } - g.minOf { Scanner.captureSecOf(it) } <= BURST_WINDOW_SEC
                 }
             for (run in tailed.values) groups += run
+            // 3. time-gap clustering in camera folders only
+            if (folder.lowercase().contains("dcim") || folder.lowercase().contains("camera")) {
+                var run = mutableListOf<MediaItem>()
+                fun flush() {
+                    if (run.size >= BURST_MIN_GROUP) groups += run.toList()
+                    run = mutableListOf()
+                }
+                for (f in files.sortedBy { Scanner.captureSecOf(it) }) {
+                    if (run.isEmpty()) {
+                        run += f
+                        continue
+                    }
+                    val gap = Scanner.captureSecOf(f) - Scanner.captureSecOf(run.last())
+                    if (gap in 0..BURST_GAP_SEC) {
+                        run += f
+                    } else {
+                        flush()
+                        run += f
+                    }
+                }
+                flush()
+            }
         }
         return groups
     }

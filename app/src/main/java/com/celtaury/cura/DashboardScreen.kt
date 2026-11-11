@@ -559,10 +559,11 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(20.dp))
 
-            // ── Secondary tiles (Batch G): Summary takes Browse's slot —
-            // the month-raid gallery died, the decks already cover judging.
-            // Keep Safe moved into More Tools as "Manager"; its tile now
-            // leads to Large Files, promoted out of the legacy attic.
+            // ── Secondary tiles (Batch G, renamed Batch K): Summary takes
+            // Browse's slot — the month-raid gallery died, the decks already
+            // cover judging. Batch K: this tile is "Manager" now (the
+            // Keep-Safe→Manager rename was a mistarget — Keep Safe keeps its
+            // own name inside), and Large Files leads out of the attic.
             val tiles = listOf(
                 FeatureTile(
                     stringResource(R.string.dash_open_summary),

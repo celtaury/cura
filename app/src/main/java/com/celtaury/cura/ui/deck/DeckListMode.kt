@@ -35,7 +35,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -49,6 +48,10 @@ import com.celtaury.cura.core.relativeDays
  * Same state as the deck (queue of URIs to clean, KeepSafe for keeps), a
  * different body: scannable rows instead of one big card. The toggle lives
  * in the tool's top bar ([ViewModeToggle]).
+ *
+ * Batch K: rows judge with THE shared gesture now ([SwipeActionItem]) —
+ * swipe left queues / un-queues, swipe right keeps safe, tap previews —
+ * exactly like the Social Cleaner, everywhere.
  *
  * Row semantics mirror the deck gestures exactly:
  *   · Keep → KeepSafe (the deck keeps skipping kept items after a reload);
@@ -104,17 +107,21 @@ fun DeckListMode(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(shown, key = { it.uri.toString() }) { item ->
-                ListModeRow(
-                    item = item,
-                    queued = item.uri.toString() in queuedUris,
-                    kept = item.uri.toString() in keptUris,
-                    onKeep = {
+                SwipeActionItem(
+                    isQueued = item.uri.toString() in queuedUris,
+                    onSwipeLeft = { onToggleQueue(item) },
+                    onSwipeRight = {
                         keptUris = keptUris + item.uri.toString()
                         onKeep(item)
-                    },
-                    onToggleQueue = { onToggleQueue(item) },
-                    onPreview = { onPreview(item) }
-                )
+                    }
+                ) {
+                    ListModeRow(
+                        item = item,
+                        queued = item.uri.toString() in queuedUris,
+                        kept = item.uri.toString() in keptUris,
+                        onPreview = { onPreview(item) }
+                    )
+                }
             }
         }
 
@@ -173,8 +180,6 @@ private fun ListModeRow(
     item: MediaItem,
     queued: Boolean,
     kept: Boolean,
-    onKeep: () -> Unit,
-    onToggleQueue: () -> Unit,
     onPreview: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
@@ -236,30 +241,6 @@ private fun ListModeRow(
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 )
             }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                stringResource(R.string.common_btn_keep),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (kept) cs.onSurfaceVariant else cs.tertiary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable(enabled = !kept, onClick = onKeep)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            )
-            Text(
-                if (queued) stringResource(R.string.list_unqueue) else stringResource(R.string.common_btn_clean),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = cs.error,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable(onClick = onToggleQueue)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            )
         }
     }
 }

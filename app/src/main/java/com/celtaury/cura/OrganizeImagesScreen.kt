@@ -110,7 +110,9 @@ private fun OrganizeImagesContent(onBack: () -> Unit) {
                 var n = 0
                 for (item in items) {
                     try {
-                        val folder = Scanner.monthKeyOf(item.dateAddedSec)
+                        // capture month (Batch I) — must match the tiles, which
+                        // group by monthKeyOf(item) since the copy-month collapse
+                        val folder = Scanner.monthKeyOf(item)
                         val values = ContentValues().apply {
                             put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/Cura/$folder")
                         }

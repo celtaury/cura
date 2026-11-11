@@ -4,7 +4,6 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
@@ -14,7 +13,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -42,7 +40,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -78,15 +75,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -102,6 +96,7 @@ import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
 import com.celtaury.cura.ui.deck.DeckCard
+import com.celtaury.cura.ui.deck.SwipeActionItem
 import com.celtaury.cura.ui.deck.ViewModeToggle
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import com.celtaury.cura.ui.theme.InterBlack
@@ -110,7 +105,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
-import kotlin.math.roundToInt
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 
@@ -841,137 +835,5 @@ private fun SocialCleanerContent(onBack: () -> Unit) {
             },
             onDismiss = { previewItem = null }
         )
-    }
-}
-
-/**
- * Material 3 Expressive swipable item container:
- * - Expressive bouncy springs with dynamic icon scaling and opacity
- * - Swipe left: reveals red Queue Delete background with smooth icon expansion
- * - Swipe right: reveals green Keep Safe background with smooth icon expansion
- */
-@Composable
-private fun SwipeActionItem(
-    isQueued: Boolean,
-    modifier: Modifier = Modifier,
-    onSwipeLeft: () -> Unit,
-    onSwipeRight: () -> Unit,
-    content: @Composable () -> Unit
-) {
-    val offsetX = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val thresholdPx = with(density) { 85.dp.toPx() }
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-    ) {
-        val currentOffset = offsetX.value
-        val progress = (abs(currentOffset) / thresholdPx).coerceIn(0f, 1.4f)
-        val iconScale = (0.6f + progress * 0.45f).coerceIn(0.6f, 1.15f)
-        val alpha = progress.coerceIn(0f, 1f)
-
-        if (currentOffset > 8f) {
-            // Swiping right: Green (Keep Safe)
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(Color(0xFF388E3C)),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(
-                    modifier = Modifier
-                        .padding(start = 22.dp)
-                        .scale(iconScale),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Security,
-                        contentDescription = stringResource(R.string.common_keep_cd),
-                        tint = Color.White.copy(alpha = alpha),
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Text(
-                        stringResource(R.string.common_keep_btn),
-                        color = Color.White.copy(alpha = alpha),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
-            }
-        } else if (currentOffset < -8f) {
-            // Swiping left: Red (Queue / Delete)
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(MaterialTheme.colorScheme.error),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Row(
-                    modifier = Modifier
-                        .padding(end = 22.dp)
-                        .scale(iconScale),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        if (isQueued) stringResource(R.string.common_remove_queue) else stringResource(R.string.common_queue_delete),
-                        color = Color.White.copy(alpha = alpha),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Icon(
-                        if (isQueued) Icons.Default.RemoveCircleOutline else Icons.Default.Delete,
-                        contentDescription = stringResource(R.string.common_queue_delete),
-                        tint = Color.White.copy(alpha = alpha),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-        }
-
-        // Foreground content with bouncy spring snapback
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                .pointerInput(isQueued) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            scope.launch {
-                                val next = (offsetX.value + dragAmount)
-                                    .coerceIn(-thresholdPx * 1.5f, thresholdPx * 1.5f)
-                                offsetX.snapTo(next)
-                            }
-                        },
-                        onDragEnd = {
-                            // Action FIRST — instant state change — then the
-                            // snapback in parallel. Chaining the action after a
-                            // soft spring delayed feedback by ~2 s (bug #6).
-                            when {
-                                offsetX.value > thresholdPx -> onSwipeRight()
-                                offsetX.value < -thresholdPx -> onSwipeLeft()
-                            }
-                            scope.launch {
-                                offsetX.animateTo(
-                                    0f,
-                                    spring(dampingRatio = 0.8f, stiffness = 700f)
-                                )
-                            }
-                        },
-                        onDragCancel = {
-                            scope.launch {
-                                offsetX.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 700f))
-                            }
-                        }
-                    )
-                }
-        ) {
-            content()
-        }
     }
 }

@@ -135,8 +135,9 @@ fun MoreToolsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit = {}) {
 
             Spacer(Modifier.height(14.dp))
 
-            // Menu rows. Batch G: Keep Safe is "Manager" now — same screen,
-            // honest name: it manages the files you saved from cleanup.
+            // Menu rows. Batch K fix (user: the Keep-Safe→Manager rename
+            // was a mistarget): this screen is "Manager" now, and the row
+            // that opens the shielded files is "Keep Safe" again.
             MenuRow(title = stringResource(R.string.more_manager), subtitle = stringResource(R.string.more_manager_sub)) {
                 onNavigate("keepsafe")
             }

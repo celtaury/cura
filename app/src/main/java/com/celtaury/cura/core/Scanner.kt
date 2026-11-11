@@ -18,6 +18,8 @@ data class MediaItem(
     val sizeBytes: Long,
     val uri: Uri,
     val dateAddedSec: Long,
+    /** EXIF capture time in SECONDS — 0 when the file carries none. */
+    val dateTakenSec: Long = 0,
     val path: String,
     val mime: String
 )
@@ -45,7 +47,12 @@ object Scanner {
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_ADDED,
-            MediaStore.MediaColumns.MIME_TYPE
+            MediaStore.MediaColumns.MIME_TYPE,
+            // Batch I: WHEN the shot was taken, not when it landed on this
+            // device — a bulk phone migration gives every file the same
+            // DATE_ADDED day, which once collapsed the whole library into a
+            // single month bucket and silently switched month picking off.
+            MediaStore.MediaColumns.DATE_TAKEN
         )
         base.add(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
@@ -91,6 +98,8 @@ object Scanner {
                 val iSize = c.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
                 val iDate = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
                 val iMime = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+                // DATE_TAKEN is optional on exotic collections — index may be -1
+                val iTaken = c.getColumnIndex(MediaStore.MediaColumns.DATE_TAKEN)
                 val iPath = c.getColumnIndexOrThrow(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                         MediaStore.MediaColumns.RELATIVE_PATH
@@ -104,6 +113,7 @@ object Scanner {
                             sizeBytes = c.getLong(iSize),
                             uri = Uri.withAppendedPath(uri, c.getLong(iId).toString()),
                             dateAddedSec = c.getLong(iDate),
+                            dateTakenSec = if (iTaken >= 0) c.getLong(iTaken) / 1000L else 0L,
                             path = c.getString(iPath) ?: "",
                             mime = c.getString(iMime) ?: ""
                         )
@@ -263,21 +273,8 @@ object Scanner {
             }
             all.filter { !isProtected(context, it) }
                 .distinctBy { it.uri }
-                .sortedBy { it.dateAddedSec }
+                .sortedBy { captureSecOf(it) }   // Batch I: oldest SHOT first, not oldest copy
                 .take(500)
-        }
-
-    /** Zero-byte files found in visible collections (capped — some devices have thousands). */
-    suspend fun emptyFiles(context: Context): List<MediaItem> =
-        withContext(Dispatchers.IO) {
-            val out = mutableListOf<MediaItem>()
-            out += query(
-                context,
-                mediaUri("files"),
-                selection = "${MediaStore.MediaColumns.SIZE} = 0",
-                order = "${MediaStore.MediaColumns.DISPLAY_NAME} ASC"
-            )
-            out.filter { !isProtected(context, it) && it.displayName.isNotBlank() }.take(500)
         }
 
     /** Stray .apk files (usually forgotten downloads). */
@@ -358,10 +355,11 @@ object Scanner {
             ).filter { !isProtected(context, it) }   // keep-safe stays out of EVERY surface — incl. Organize's month tiles and (future) month delete
             val groups = LinkedHashMap<String, MutableList<MediaItem>>()
             for (item in all) {
-                val key = monthKeyOf(item.dateAddedSec)
+                val key = monthKeyOf(item)   // capture month (Batch I)
                 groups.getOrPut(key) { mutableListOf() }.add(item)
             }
-            groups.entries.sortedByDescending { it.key }.map { it.key to it.value.toList() }
+            groups.entries.sortedByDescending { it.key }
+                .map { (key, list) -> key to list.sortedByDescending { captureSecOf(it) } }
         }
 
     /**
@@ -381,10 +379,10 @@ object Scanner {
             }
             all.filter { !isProtected(context, it) }
                 .distinctBy { it.uri }
-                .groupBy { monthKeyOf(it.dateAddedSec) }
+                .groupBy { monthKeyOf(it) }   // capture month (Batch I)
                 .entries
                 .sortedByDescending { it.key }
-                .map { (key, list) -> key to list.sortedByDescending { it.dateAddedSec } }
+                .map { (key, list) -> key to list.sortedByDescending { captureSecOf(it) } }
         }
 
     /**
@@ -416,6 +414,18 @@ object Scanner {
             else -> "Other"
         }
     }
+
+    /**
+     * When this shot is really FROM — capture time when the file carries it,
+     * falling back to DATE_ADDED for files without EXIF (downloads, editors).
+     * Every month bucket and burst window must go through this, never raw
+     * DATE_ADDED.
+     */
+    fun captureSecOf(item: MediaItem): Long =
+        if (item.dateTakenSec > 0) item.dateTakenSec else item.dateAddedSec
+
+    /** Month bucket of an ITEM — capture month, not the copy month. */
+    fun monthKeyOf(item: MediaItem): String = monthKeyOf(captureSecOf(item))
 
     fun monthKeyOf(dateAddedSec: Long): String {
         val cal = java.util.Calendar.getInstance()
