@@ -71,9 +71,9 @@ That's the complete list. No location, no contacts, no network, no ads SDKs. Cur
 ## Roadmap
 
 - [x] v0.8 — major redesign, Material 3 Expressive
-- [ ] More cleaning modules (photos, organization improvements)
+- [x] More cleaning modules (photos, organization improvements)
 - [ ] F-Droid / IzzyOnDroid availability
-- [ ] v1.0 polish pass
+- [x] v1.0 polish pass
 
 ## Donate
 
