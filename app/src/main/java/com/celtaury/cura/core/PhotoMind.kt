@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
+import android.util.Size
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -56,6 +58,23 @@ object PhotoMind {
     private val BURST_TAIL = Regex("^(.+?)[-_](\\d{1,3})$")
     private val BURST_MARK = Regex("burst", RegexOption.IGNORE_CASE)
 
+    // Batch M — signal 4: look-alike chains. The same subject shot minutes
+    // apart, in ANY folder: a 256-bit dHash per frame (cheap ~64px decode,
+    // cached) fuses series that neither burst naming nor a ≤2 s camera-folder
+    // window can catch. Chain rule (Batch N): every hop needs EXIF-accurate
+    // times on both ends, ≤[LOOKALIKE_GAP_SEC] from the previous frame, and
+    // ≤[LOOKALIKE_BITS] bits from BOTH the run's ANCHOR (first frame) and the
+    // previous frame; [BURST_MIN_GROUP] frames make a burst,
+    // [LOOKALIKE_MAX_GROUP] is the fuse.
+    private const val LOOKALIKE_GAP_SEC = 300L           // minutes apart — one hop, not a whole evening
+    private const val LOOKALIKE_MIN_BYTES = 50_000L      // icons/stickers stay out
+    private const val LOOKALIKE_BITS = 28                // of 256 — ~11%, the classic dHash "same scene" band
+    private const val LOOKALIKE_BUDGET_MS = 3500L        // decode wall-clock cap
+    private const val LOOKALIKE_MAX_GROUP = 12           // Batch N fuse: a longer chain is a mood, not a burst — dissolve it
+
+    /** dHash cache — "id|size" so edited files re-hash. Shared deck ⇄ scan. */
+    private val hashCache = ConcurrentHashMap<String, LongArray>()
+
     private val CAMERA_MIMES = setOf("image/jpeg", "image/heic", "image/heif", "image/webp")
 
     /** What the pixels said about one image. Content-only — family rules decide. */
@@ -70,7 +89,10 @@ object PhotoMind {
         val burstExtras: List<MediaItem> = emptyList(),
         val blurry: List<MediaItem> = emptyList(),
         val boringShots: List<MediaItem> = emptyList(),
-        val documents: List<MediaItem> = emptyList()
+        val documents: List<MediaItem> = emptyList(),
+        /** Batch M: every full burst group (cover included) — the Suggest
+         *  deck collapses each into ONE group card instead of one per extra. */
+        val burstGroupsFull: List<List<MediaItem>> = emptyList()
     )
 
     // verdict cache — "id|size" so edited/replaced files re-analyze
@@ -83,16 +105,22 @@ object PhotoMind {
     suspend fun scan(context: Context): PhotoFamilies = withContext(Dispatchers.IO) {
         val all = Scanner.imageInventory(context)
 
-        // ── 1. burst groups — pure naming, zero decodes ─────────────
+        // ── 1. burst groups — naming rules + Batch M look-alike chains ──
         val claimed = HashSet<String>()
         val burstExtras = mutableListOf<MediaItem>()
-        for (group in burstGroups(all)) {
+        val groups = burstGroups(all, context)
+        val extrasSeen = HashSet<String>()
+        for (group in groups) {
             val cover = group.firstOrNull { it.displayName.contains("cover", true) }
                 ?: group.maxByOrNull { it.sizeBytes }
                 ?: continue
             for (member in group) {
                 if (member.uri == cover.uri) continue
-                claimed += member.uri.toString()
+                val key = member.uri.toString()
+                // a look-alike chain can overlap a named burst — claim once
+                if (key in extrasSeen) continue
+                extrasSeen += key
+                claimed += key
                 burstExtras += member
             }
         }
@@ -139,7 +167,7 @@ object PhotoMind {
             }
         }
 
-        PhotoFamilies(burstExtras, blurry, boringShots, documents)
+        PhotoFamilies(burstExtras, blurry, boringShots, documents, groups)
     }
 
     // ── burst grouping ───────────────────────────────────────────────
@@ -151,11 +179,18 @@ object PhotoMind {
      * videos keep their individual cards. Batch K: overlapping detections
      * are resolved by first claim (largest group wins) so a file can never
      * sit in two bursts — that used to corrupt the group-judge index.
+     *
+     * Batch M: suspend + context — look-alike chains decode tiny thumbnails,
+     * so this now runs on IO (the deck computes it inside its load effect)
+     * and shares the dHash cache with the scan pass.
      */
-    fun burstGroupsOf(items: List<MediaItem>): List<List<MediaItem>> {
+    suspend fun burstGroupsOf(
+        context: Context,
+        items: List<MediaItem>
+    ): List<List<MediaItem>> = withContext(Dispatchers.IO) {
         val seen = HashSet<String>()
         val out = mutableListOf<List<MediaItem>>()
-        for (group in burstGroups(items.filter { it.mime.startsWith("image/") })
+        for (group in burstGroups(items.filter { it.mime.startsWith("image/") }, context)
             .sortedByDescending { it.size }
         ) {
             val fresh = group.filter { it.uri.toString() !in seen }
@@ -164,11 +199,11 @@ object PhotoMind {
                 out += fresh
             }
         }
-        return out
+        out
     }
 
     /**
-     * Burst detection, three signals (Batch K rewrote #3):
+     * Burst detection, four signals (Batch K rewrote #3, Batch M added #4):
      *  1. explicit burst naming — Google Camera writes "…_BURST004" (plus a
      *     "…_BURST_COVER" keeper frame);
      *  2. numeric-tail naming — ≥[BURST_MIN_GROUP] same-folder files sharing
@@ -181,10 +216,24 @@ object PhotoMind {
      *     times ≤[BURST_GAP_SEC] apart. ≥[BURST_MIN_GROUP] such frames in a
      *     chain = one burst. Restricted to camera folders (DCIM/Camera) so a
      *     batch of WhatsApp/Telegram downloads — which share one DATE_ADDED
-     *     instant — can never fuse into a fake mega-burst.
+     *     instant — can never fuse into a fake mega-burst. Batch N: only
+     *     files with EXIF-accurate capture times chain — a noon filename
+     *     stamp (remasters, exports) fakes gap-0 across a whole day.
+     *  4. look-alike chains (Batch M, Batch N) — the user's actual bursts
+     *     are series of the SAME subject, shot minutes apart, in any folder.
+     *     Every frame gets a 256-bit dHash (cached, budget-capped); frames
+     *     chain while each hop has EXIF-accurate times on both ends, sits
+     *     ≤[LOOKALIKE_GAP_SEC] from the previous frame, and stays
+     *     ≤[LOOKALIKE_BITS] bits from BOTH the run's ANCHOR and the previous
+     *     frame. The anatomy of the old 180-photo "burst": no EXIF → noon
+     *     stamps → gap-0 forever; a 9×9/64-bit hash that called every
+     *     "bright subject, dark surround" the same scene; and no size cap.
+     *     Now ≥[BURST_MIN_GROUP] frames group and anything past
+     *     [LOOKALIKE_MAX_GROUP] dissolves — better to miss a series than to
+     *     swallow the trip.
      * Screenshots stay out — they have their own families.
      */
-    private fun burstGroups(all: List<MediaItem>): List<List<MediaItem>> {
+    private fun burstGroups(all: List<MediaItem>, context: Context): List<List<MediaItem>> {
         val photos = all.filter { !Scanner.isScreenshotLike(it) }
         val groups = mutableListOf<List<MediaItem>>()
         for ((folder, files) in photos.groupBy { it.path.substringBeforeLast('/') }) {
@@ -215,6 +264,11 @@ object PhotoMind {
                     run = mutableListOf()
                 }
                 for (f in files.sortedBy { Scanner.captureSecOf(it) }) {
+                    // Batch N: no EXIF date-taken = fake gap-0 chains — a
+                    // noon filename stamp makes a whole DAY gap-0, and
+                    // DATE_ADDED can be one bulk-copy instant. Real camera
+                    // bursts always carry EXIF, so nothing real is lost.
+                    if (!Scanner.captureSecIsFine(f)) continue
                     if (run.isEmpty()) {
                         run += f
                         continue
@@ -230,6 +284,57 @@ object PhotoMind {
                 flush()
             }
         }
+
+        // ── 4. look-alike chains (Batch M) — any folder, minutes apart ──
+        // Batch N hardening — the anatomy of the 180-photo mega-burst:
+        //  a. fake capture times: no EXIF + a date-only filename stamps every
+        //     file of that DAY at noon, so the ≤300 s gate never fired and the
+        //     whole evening looked like one instant. Chaining now requires
+        //     EXIF-accurate times on BOTH ends of every hop.
+        //  b. the 9×9/64-bit dHash read "bright subject centred, dark
+        //     surround" as the same scene. Now 16×16/256-bit, and a hop must
+        //     stay within [LOOKALIKE_BITS] of the ANCHOR and the previous
+        //     frame — composition-alikes don't chain.
+        //  c. no size fuse: a chain ran until the folder ended. A run past
+        //     [LOOKALIKE_MAX_GROUP] frames is a mood, not a burst — it
+        //     dissolves, nothing groups or gets claimed. Better to miss a
+        //     series than to swallow the trip.
+        val hashDeadline = System.currentTimeMillis() + LOOKALIKE_BUDGET_MS
+        for ((_, files) in photos.groupBy { it.path.substringBeforeLast('/') }) {
+            val hashed = mutableListOf<Pair<MediaItem, LongArray>>()
+            for (f in files.sortedBy { Scanner.captureSecOf(it) }) {
+                if (System.currentTimeMillis() > hashDeadline) break
+                if (!Scanner.captureSecIsFine(f)) continue
+                if (f.sizeBytes < LOOKALIKE_MIN_BYTES) continue
+                if (!f.mime.startsWith("image/")) continue
+                val h = dHashOf(context, f) ?: continue
+                hashed += f to h
+            }
+            var run = mutableListOf<Pair<MediaItem, LongArray>>()
+            fun flushLook() {
+                if (run.size in BURST_MIN_GROUP..LOOKALIKE_MAX_GROUP) {
+                    groups += run.map { it.first }
+                }
+                run = mutableListOf()
+            }
+            for (pair in hashed) {
+                if (run.isEmpty()) {
+                    run += pair
+                    continue
+                }
+                val gap = Scanner.captureSecOf(pair.first) - Scanner.captureSecOf(run.last().first)
+                val okTime = gap in 0..LOOKALIKE_GAP_SEC
+                val okLook = bitsDiff(pair.second, run.first().second) <= LOOKALIKE_BITS &&
+                    bitsDiff(pair.second, run.last().second) <= LOOKALIKE_BITS
+                if (okTime && okLook) {
+                    run += pair
+                } else {
+                    flushLook()
+                    run += pair
+                }
+            }
+            flushLook()
+        }
         return groups
     }
 
@@ -238,6 +343,54 @@ object PhotoMind {
         val stem = name.substringBeforeLast('.', name).lowercase()
         val cut = stem.indexOf("burst")
         return if (cut > 0) stem.substring(0, cut) else stem
+    }
+
+    /**
+     * 256-bit difference hash (dHash) of the shared ~128px decode — "do these
+     * two photos show the same scene" with zero ML. Reads a 17×16 luminance
+     * grid left-to-right; each bit says whether a pixel is brighter than its
+     * right neighbour — 16 bits per row × 16 rows ride in four lanes.
+     *
+     * Batch N: was 9×9/64-bit — so coarse that any "bright subject centred,
+     * dark surround" composition looked alike, which is how one folder fused
+     * into a 180-photo burst. 16×16 keeps genuine same-scene series in and
+     * pushes composition-alike strangers out. Cached per "id|size"; null =
+     * undecodable file.
+     */
+    private fun dHashOf(context: Context, item: MediaItem): LongArray? {
+        val key = "${item.id}|${item.sizeBytes}"
+        hashCache[key]?.let { return it }
+        return try {
+            val bmp = decodeThumb(context, item.uri) ?: return null
+            val scaled = Bitmap.createScaledBitmap(bmp, 17, 16, true)
+            val lum = IntArray(16 * 17)
+            for (y in 0 until 16) for (x in 0 until 17) {
+                val p = scaled.getPixel(x, y)
+                lum[y * 17 + x] = ((p shr 16 and 0xFF) * 299 +
+                    (p shr 8 and 0xFF) * 587 + (p and 0xFF) * 114) / 1000
+            }
+            val hash = LongArray(4)
+            for (y in 0 until 16) for (x in 0 until 16) {
+                val idx = y * 16 + x
+                hash[idx / 64] = (hash[idx / 64] shl 1) or
+                    (if (lum[y * 17 + x] < lum[y * 17 + x + 1]) 1L else 0L)
+            }
+            if (scaled !== bmp) scaled.recycle()
+            bmp.recycle()
+            hashCache[key] = hash
+            hash
+        } catch (_: Exception) {
+            null
+        } catch (_: OutOfMemoryError) {
+            null
+        }
+    }
+
+    /** Hamming distance across the four 64-bit dHash lanes. */
+    private fun bitsDiff(a: LongArray, b: LongArray): Int {
+        var n = 0
+        for (i in a.indices) n += java.lang.Long.bitCount(a[i] xor b[i])
+        return n
     }
 
     // ── pixel pass ───────────────────────────────────────────────────

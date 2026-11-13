@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.DeleteQueuePrefs
+import com.celtaury.cura.core.DonationPrefs
 import com.celtaury.cura.core.JunkCategory
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
@@ -268,7 +269,12 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             // half-denied system dialog only credits what Android reports.
             lastFreedBytes = freedBytes
             lastFreedCount = cleaned.size
-            if (freedBytes > 0L) phase = "done"
+            if (freedBytes > 0L) {
+                phase = "done"
+                // Batch M: a finished Quick Clean counts toward the one-time
+                // donation prompt (shows after the 2nd completed session).
+                DonationPrefs.noteSessionDone(context)
+            }
 
             Toast.makeText(context, context.getString(R.string.common_cleaned_ok), Toast.LENGTH_SHORT).show()
         }

@@ -13,8 +13,8 @@ android {
         applicationId = "com.celtaury.cura"
         minSdk = 26
         targetSdk = 37
-        versionCode = 13
-        versionName = "0.9.14"
+        versionCode = 19
+        versionName = "0.9.20"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -210,23 +210,22 @@
     <string name="more_storage">Device storage</string>
     <string name="more_trash">Trash &amp; recovery 🗑️</string>
     <string name="more_trash_sub">Bring back files a clean deleted — before the ~30 days end</string>
-    <string name="onb_1_body">Your phone collects digital dust: duplicates, forgotten screenshots, chat-app memes.\n\nCura helps you reclaim that space — safely, and one beautiful card at a time.</string>
-    <string name="onb_1_title">Meet CURA</string>
-    <string name="onb_2_body">The file is protected forever — no cleaner will ever touch it.</string>
-    <string name="onb_2_title">Swipe right to Keep</string>
-    <string name="onb_3_body">It joins your cleaning queue. You confirm before anything happens.</string>
-    <string name="onb_3_title">Swipe left to Clean</string>
-    <string name="onb_4_body">Nothing is ever deleted without your explicit OK — Android itself asks last.\n\nDeleted files rest in the system Trash for ~30 days.\n\nAnd the Keep-safe list outranks every cleaner in the app.</string>
-    <string name="onb_4_title">Safe by design</string>
-    <string name="onb_gesture">One gesture. That\'s it.</string>
+    <string name="onb_demo_body">Swipe right to keep, left to clean. Cleaned files wait 30 days in Trash.</string>
+    <string name="onb_demo_hint">More in the tool →</string>
+    <string name="onb_demo_title">Swipe. Done.</string>
     <string name="onb_go">Let\'s go 🌿</string>
     <string name="onb_grant">Grant access</string>
-    <string name="onb_lang_sub">You can change this anytime in Settings</string>
-    <string name="onb_lang_title">Choose your language</string>
+    <string name="onb_instant_body">On: every swipe deletes right away — no confirm sheet.\n\nOff: deletes wait in your queue.\n\nChange it anytime in Settings.</string>
+    <string name="onb_instant_off">Off</string>
+    <string name="onb_instant_on">On</string>
+    <string name="onb_instant_title">Gone in one swipe?</string>
+    <string name="onb_instant_toggle">Instant delete</string>
     <string name="onb_next">Next</string>
     <string name="onb_not_now">Not now</string>
-    <string name="onb_perm_body">Last step: let Cura look at your photos &amp; videos. It all stays on your phone.</string>
-    <string name="onb_skip">Skip</string>
+    <string name="onb_perm_body">Let Cura see your photos &amp; videos. Everything stays on your phone.</string>
+    <string name="onb_perm_title">One permission</string>
+    <string name="onb_welcome_sub">Cura has no ads.</string>
+    <string name="onb_welcome_title">Clean your phone.</string>
     <string name="org_desc">Your gallery, grouped by month. Pick photos and tidy them into their own Cura folders.</string>
     <string name="org_dest">Moves into Pictures/Cura/&lt;month&gt;</string>
     <string name="org_empty">No photos found</string>
@@ -495,7 +494,15 @@
     <string name="common_view_list">List</string>
     <string name="common_continue">Continue</string>
     <string name="deck_burst_badge">⚡ Burst ×%1$d</string>
-    <string name="deck_burst_hint">One swipe judges all %1$d</string>
+    <string name="deck_burst_hint">Tap to pick the keepers</string>
+    <string name="deck_burst_pick_confirm">Keep %1$d · Delete %2$d</string>
+    <string name="deck_burst_pick_sub">Tap a photo to view it full-screen · the corner badge (or press &amp; hold) flips keep/delete.</string>
+    <string name="deck_burst_pick_title">Burst · %1$d photos</string>
+    <string name="prev_burst_done">Done</string>
+    <string name="prev_burst_keep_this">Keep this one</string>
+    <string name="prev_burst_keeping">✓ Keeping — tap to undo</string>
+    <string name="prev_burst_pos">Photo %1$d of %2$d</string>
+    <string name="prev_burst_swipe_hint">Swipe to flip through the burst</string>
     <string name="deck_month_done_title">%1$s is clean</string>
     <string name="deck_month_done_next">Continue with %1$s — %2$d to judge</string>
     <string name="deck_month_done_later">Leave it for later</string>
@@ -507,4 +514,10 @@
     <string name="sug_list_header">%1$d findings to judge</string>
     <string name="soc_deck_done">All judged here</string>
     <string name="soc_deck_done_hint">Switch filters, or flip back to the list to keep going.</string>
+
+    <!-- Batch M: one-time donation prompt (after the 2nd finished clean) -->
+    <string name="don_title">Enjoying Cura?</string>
+    <string name="don_body">Cura is free! A donation will motivate me and help me make more apps like this!</string>
+    <string name="don_btn">Donate</string>
+    <string name="don_later">Maybe later</string>
 </resources>

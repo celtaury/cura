@@ -210,23 +210,22 @@
     <string name="more_storage">Penyimpanan perangkat</string>
     <string name="more_trash">Trash &amp; pemulihan 🗑️</string>
     <string name="more_trash_sub">Kembalikan file yang dibersihkan — sebelum ~30 hari berakhir</string>
-    <string name="onb_1_body">Ponselmu menumpuk debu digital: duplikat, screenshot terlupakan, meme aplikasi chat.\n\nCura membantumu merebut kembali ruang itu — dengan aman, satu kartu cantik demi satu kartu.</string>
-    <string name="onb_1_title">Kenalan dengan CURA</string>
-    <string name="onb_2_body">File itu dilindungi selamanya — tidak ada pembersih yang akan menyentuhnya.</string>
-    <string name="onb_2_title">Geser kanan untuk Simpan</string>
-    <string name="onb_3_body">Masuk antrean pembersihanmu. Kamu konfirmasi dulu sebelum apa pun terjadi.</string>
-    <string name="onb_3_title">Geser kiri untuk Bersihkan</string>
-    <string name="onb_4_body">Tidak ada yang dihapus tanpa OK eksplisit darimu — Android sendiri yang bertanya terakhir.\n\nFile terhapus istirahat di Trash sistem ~30 hari.\n\nDan daftar Keep-safe lebih tinggi dari semua pembersih di aplikasi.</string>
-    <string name="onb_4_title">Aman sejak desain</string>
-    <string name="onb_gesture">Satu gerakan. Itu saja.</string>
+    <string name="onb_demo_body">Kanan untuk simpan, kiri untuk bersihkan. File yang dibersihkan menunggu 30 hari di Trash.</string>
+    <string name="onb_demo_hint">Selengkapnya di dalam aplikasi →</string>
+    <string name="onb_demo_title">Geser. Selesai.</string>
     <string name="onb_go">Ayo mulai 🌿</string>
     <string name="onb_grant">Beri izin</string>
-    <string name="onb_lang_sub">Bisa diubah kapan saja di Pengaturan</string>
-    <string name="onb_lang_title">Pilih bahasamu</string>
+    <string name="onb_instant_body">Aktif: setiap geseran langsung menghapus — tanpa lembar konfirmasi.\n\nMati: penghapusan menunggu di antreanmu.\n\nUbah kapan saja di Pengaturan.</string>
+    <string name="onb_instant_off">Mati</string>
+    <string name="onb_instant_on">Aktif</string>
+    <string name="onb_instant_title">Langsung tuntas dalam satu geser?</string>
+    <string name="onb_instant_toggle">Hapus instan</string>
     <string name="onb_next">Lanjut</string>
     <string name="onb_not_now">Nanti dulu</string>
-    <string name="onb_perm_body">Langkah terakhir: izinkan Cura melihat foto &amp; videomu. Semuanya tetap di ponselmu.</string>
-    <string name="onb_skip">Lewati</string>
+    <string name="onb_perm_body">Izinkan Cura melihat foto &amp; videomu. Semuanya tetap di ponselmu.</string>
+    <string name="onb_perm_title">Satu izin saja</string>
+    <string name="onb_welcome_sub">Cura bebas iklan.</string>
+    <string name="onb_welcome_title">Bersihkan ponselmu.</string>
     <string name="org_desc">Galerimu dikelompokkan per bulan. Pilih foto dan rapikan ke folder Cura masing-masing.</string>
     <string name="org_dest">Pindah ke Pictures/Cura/&lt;bulan&gt;</string>
     <string name="org_empty">Tidak ada foto</string>
@@ -494,7 +493,15 @@
     <string name="common_view_list">Daftar</string>
     <string name="common_continue">Lanjutkan</string>
     <string name="deck_burst_badge">⚡ Burst ×%1$d</string>
-    <string name="deck_burst_hint">Satu geser menilai semua %1$d</string>
+    <string name="deck_burst_hint">Ketuk untuk memilih yang disimpan</string>
+    <string name="deck_burst_pick_confirm">Simpan %1$d · Hapus %2$d</string>
+    <string name="deck_burst_pick_sub">Ketuk foto untuk melihat layar penuh · lencana di sudut (atau tekan &amp; tahan) mengubah simpan/hapus.</string>
+    <string name="deck_burst_pick_title">Burst · %1$d foto</string>
+    <string name="prev_burst_done">Selesai</string>
+    <string name="prev_burst_keep_this">Simpan yang ini</string>
+    <string name="prev_burst_keeping">✓ Disimpan — ketuk untuk batal</string>
+    <string name="prev_burst_pos">Foto %1$d dari %2$d</string>
+    <string name="prev_burst_swipe_hint">Geser untuk melihat satu per satu</string>
     <string name="deck_month_done_title">%1$s bersih</string>
     <string name="deck_month_done_next">Lanjutkan ke %1$s — %2$d untuk dinilai</string>
     <string name="deck_month_done_later">Nanti saja</string>
@@ -506,4 +513,10 @@
     <string name="sug_list_header">%1$d temuan untuk dinilai</string>
     <string name="soc_deck_done">Semua sudah dinilai</string>
     <string name="soc_deck_done_hint">Ganti filter, atau kembali ke daftar untuk lanjut.</string>
+
+    <!-- Batch M: dialog donasi sekali saja (setelah sesi ke-2 selesai) -->
+    <string name="don_title">Suka dengan Cura?</string>
+    <string name="don_body">Cura gratis! Donasi akan memotivasi saya dan membantu saya membuat lebih banyak aplikasi seperti ini!</string>
+    <string name="don_btn">Donasi</string>
+    <string name="don_later">Nanti saja</string>
 </resources>

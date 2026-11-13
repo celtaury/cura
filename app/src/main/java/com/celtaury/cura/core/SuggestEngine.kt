@@ -32,7 +32,10 @@ object SuggestEngine {
         val item: MediaItem,
         val tag: String,      // "Old screenshot" · "Duplicate" · "Stray installer" · "Old photo" · v2: "Burst extra" · "Blurry photo" · "Plain screenshot" · "Scanned document"
         val reason: String,   // the line that leads the card
-        val score: Int
+        val score: Int,
+        /** Batch M: non-empty on a burst GROUP card — the full burst (cover
+         *  included). One card judges (or hand-picks) every member at once. */
+        val group: List<MediaItem> = emptyList()
     )
 
     /** In-memory handoff so a tile tap opens the deck ON the promised card. */
@@ -110,8 +113,22 @@ object SuggestEngine {
         // resolve to whichever family was added first. "Plain screenshot" is
         // added before "Old screenshot" for exactly that reason.
         val mind = PhotoMind.scan(context)
-        mind.burstExtras.filter(::viable).forEach {
-            pool += Suggestion(it, "Burst extra", reasonFor(context, it, "Burst extra"), 5)
+        // Batch M: ONE card per burst, not one per extra — the card's photo
+        // is the group's most-deletable extra, and the full group (cover
+        // included) rides along so the deck can judge or hand-pick every
+        // frame as a single decision. Fallback keeps the flat extras if the
+        // engine ever returns groups without members.
+        if (mind.burstGroupsFull.isEmpty()) {
+            mind.burstExtras.filter(::viable).forEach {
+                pool += Suggestion(it, "Burst extra", reasonFor(context, it, "Burst extra"), 5)
+            }
+        } else {
+            val extraUris = mind.burstExtras.mapTo(HashSet()) { it.uri.toString() }
+            for (g in mind.burstGroupsFull.sortedByDescending { it.size }) {
+                val rep = g.firstOrNull { it.uri.toString() in extraUris && viable(it) }
+                    ?: continue
+                pool += Suggestion(rep, "Burst extra", reasonFor(context, rep, "Burst extra"), 5, g)
+            }
         }
         mind.blurry.filter(::viable).forEach {
             pool += Suggestion(it, "Blurry photo", reasonFor(context, it, "Blurry photo"), 5)

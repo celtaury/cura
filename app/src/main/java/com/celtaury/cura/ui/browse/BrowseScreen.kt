@@ -243,7 +243,10 @@ private fun BrowseContent(onBack: () -> Unit) {
                     },
                     actions = {
                         // Batch K: the deck's month-jump affordance, here too.
-                        if (visibleMonths.size > 1) {
+                        // Batch L: shown even with ONE month — a collapsed
+                        // library must still SEE the picker, not wonder where
+                        // the feature went.
+                        if (visibleMonths.isNotEmpty()) {
                             IconButton(onClick = { pickerOpen = true }) {
                                 Icon(
                                     Icons.Default.CalendarMonth,
@@ -382,8 +385,9 @@ private fun BrowseContent(onBack: () -> Unit) {
 
     // Batch K: THE month picker, shared with the deck. Every visible month
     // is one row with its file count; picking one scrolls the grid to that
-    // month's header.
-    if (visibleMonths.size > 1) {
+    // month's header. Batch L: composed even with one month — one honest row
+    // beats a silently missing feature.
+    if (visibleMonths.isNotEmpty()) {
         MonthSidebar(
             visible = pickerOpen,
             slices = visibleMonths.map { (key, _) -> MonthSlice(key, emptyList()) },

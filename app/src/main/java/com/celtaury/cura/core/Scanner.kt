@@ -251,7 +251,7 @@ object Scanner {
                 !isShot && !isSocial
             }.filter { !isProtected(context, it) }
                 .distinctBy { it.uri }
-                .sortedBy { it.dateAddedSec }   // oldest first — the dusty stuff leads
+                .sortedBy { captureSecOf(it) }   // oldest SHOT first (Batch L: filename dates rescue EXIF-less files)
                 .take(600)
         }
 
@@ -416,13 +416,57 @@ object Scanner {
     }
 
     /**
-     * When this shot is really FROM — capture time when the file carries it,
-     * falling back to DATE_ADDED for files without EXIF (downloads, editors).
-     * Every month bucket and burst window must go through this, never raw
-     * DATE_ADDED.
+     * Filenames still know the date after a migration strips EXIF: camera
+     * defaults (IMG_20241111_123456, PXL_20241111_..., VID_20241111_...),
+     * WhatsApp saves (IMG-20241111-WA0001), screenshots
+     * (Screenshot_20241111-123456), plain exports (20241111_123456).
+     * Batch L: on a migrated library these files carry DATE_TAKEN = 0, so
+     * they all fell back to the one DATE_ADDED migration day and collapsed
+     * the month picker into a single dead bucket — the picker looked
+     * "not implemented" again.
+     */
+    private val FILENAME_DATE =
+        Regex("(?:^|[^0-9])(20[0-3]\\d)[._\\- ]?(\\d{2})[._\\- ]?(\\d{2})(?:$|[^0-9])")
+
+    private fun filenameCaptureSec(name: String): Long {
+        val m = FILENAME_DATE.find(name) ?: return 0L
+        val year = m.groupValues[1].toInt()
+        val month = m.groupValues[2].toInt()
+        val day = m.groupValues[3].toInt()
+        if (month !in 1..12 || day !in 1..31 || year !in 2000..2039) return 0L
+        return try {
+            val cal = java.util.Calendar.getInstance()
+            cal.clear()
+            cal.set(year, month - 1, day, 12, 0, 0)   // noon: immune to DST day shifts
+            cal.timeInMillis / 1000L
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    /**
+     * When this shot is really FROM — capture time when the file carries
+     * it, then the date stamped in its filename (Batch L), then DATE_ADDED
+     * for what remains. Every month bucket and burst window must go through
+     * this, never raw DATE_ADDED.
      */
     fun captureSecOf(item: MediaItem): Long =
-        if (item.dateTakenSec > 0) item.dateTakenSec else item.dateAddedSec
+        when {
+            item.dateTakenSec > 0 -> item.dateTakenSec
+            else -> filenameCaptureSec(item.displayName)
+                .takeIf { it > 0 }
+                ?: item.dateAddedSec
+        }
+
+    /**
+     * Batch N: is captureSecOf second-accurate? True only when the file
+     * carries a real EXIF date-taken. The date-only filename fallback stamps
+     * every file of that DAY at noon, and DATE_ADDED can be one bulk-copy
+     * instant — both read as gap-0 chains to the burst detectors, which is
+     * how a whole evening once fused into a 180-photo "burst". Burst
+     * chaining requires fine times; month buckets keep captureSecOf.
+     */
+    fun captureSecIsFine(item: MediaItem): Boolean = item.dateTakenSec > 0
 
     /** Month bucket of an ITEM — capture month, not the copy month. */
     fun monthKeyOf(item: MediaItem): String = monthKeyOf(captureSecOf(item))

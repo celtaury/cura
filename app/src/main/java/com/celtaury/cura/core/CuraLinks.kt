@@ -4,13 +4,11 @@ package com.celtaury.cura.core
  * Outbound links in one honest place (Batch B — transparent earning).
  *
  * DONATION_URL is intentionally the ONLY place the support link lives.
- * Keep it "" until the real page exists: the Support card in Settings
- * detects the blank and shows "coming soon" instead of a dead button.
+ * The Support card in Settings opens it, and the one-time donation popup
+ * (Batch M) opens it too. Blank = both show "coming soon" / skip the button.
  *
- * When ready, paste the full URL, e.g.:
- *   const val DONATION_URL = "https://trakteer.id/your-page"
+ * Batch M: the real page is live — every donation keeps Cura ad-free.
  */
 object CuraLinks {
-    // ← paste your Trakteer / Saweria / Ko-fi / GitHub Sponsors URL here
     const val DONATION_URL: String = "https://linktr.ee/celtaury"
 }

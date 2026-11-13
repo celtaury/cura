@@ -62,6 +62,8 @@ fun CuraApp() {
     CuraTheme(darkTheme = dark) {
         Surface(modifier = Modifier.fillMaxSize()) {
             CuraNav()
+            // Batch M: the one-time donation prompt floats above every route.
+            DonationPopupDialog()
         }
     }
 }

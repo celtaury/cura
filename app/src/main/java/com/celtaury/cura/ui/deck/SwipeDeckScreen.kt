@@ -64,6 +64,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +87,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.DeckPrefs
+import com.celtaury.cura.core.DonationPrefs
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.PhotoMind
@@ -118,7 +120,10 @@ private data class DeckDecision(
     val item: MediaItem,
     val action: String,
     /** Whole burst judged with one swipe (empty = a single card). */
-    val group: List<MediaItem> = emptyList()
+    val group: List<MediaItem> = emptyList(),
+    /** Batch L "mixed": the burst picker split one group into keeps + deletes. */
+    val keptUris: Set<String> = emptySet(),
+    val queuedUris: Set<String> = emptySet()
 )
 
 /**
@@ -192,6 +197,8 @@ private fun DeckContent(
     var sessionSaved by remember { mutableStateOf(0L) }
     var allTimeSaved by remember { mutableStateOf(0L) }
     var pickerOpen by remember { mutableStateOf(false) }
+    // Batch L: the burst stack currently open in the keep-picker (null = closed).
+    var pickingBurst by remember { mutableStateOf<List<MediaItem>?>(null) }
 
     // Per-month slices of the deck (#7): month key → where its cards live.
     // Batch I: keyed by CAPTURE month (monthKeyOf(item)) — DATE_ADDED is the
@@ -209,15 +216,9 @@ private fun DeckContent(
     // Burst groups (Batch H, gallery deck): uri → the burst it belongs to.
     // Consecutive camera shots sharing a moment judge as ONE card — the
     // badge on the card says how many, one swipe decides them all.
-    val burstIndex: Map<String, List<MediaItem>> = remember(items) {
-        if (route != "deck_gallery") {
-            emptyMap()
-        } else {
-            PhotoMind.burstGroupsOf(items)
-                .flatMap { g -> g.map { m -> m.uri.toString() to g } }
-                .toMap()
-        }
-    }
+    // Batch M: computed ASYNC inside the load effect — look-alike chains
+    // decode tiny thumbnails, which must never run during composition.
+    var burstIndex by remember { mutableStateOf<Map<String, List<MediaItem>>>(emptyMap()) }
 
     // Month-end gate (Batch H): the month key that was just finished, or
     // null while no gate is showing. Set by monthGateCheck() when a
@@ -243,12 +244,23 @@ private fun DeckContent(
                 ?.filter { !KeepSafe.contains(context, it.uri) }
                 ?: emptyList()
         }
+        // Batch M: burst groups over the loaded deck — naming rules plus the
+        // new look-alike chains (suspend, IO, dHash-cached, so re-entering
+        // the deck re-groups instantly). One card per burst in every mode.
+        val groups = if (route == "deck_gallery") {
+            PhotoMind.burstGroupsOf(context, loaded)
+        } else {
+            emptyList()
+        }
         val savedIndex = DeckPrefs.index(context, route)
         val savedQueueUris = DeckPrefs.queue(context, route).toSet()
         val restoredQueue = loaded.filter { it.uri.toString() in savedQueueUris }
         index = savedIndex.coerceIn(0, loaded.size)
         queue = restoredQueue
         items = loaded
+        burstIndex = groups
+            .flatMap { g -> g.map { m -> m.uri.toString() to g } }
+            .toMap()
         resumedAt = if (savedIndex in 1 until loaded.size) savedIndex else -1
         loading = false
         phase = when {
@@ -261,6 +273,9 @@ private fun DeckContent(
     LaunchedEffect(phase) {
         if (phase == "done") {
             allTimeSaved = withContext(Dispatchers.IO) { SavedStats.savedBytes(context) }
+            // Batch M: a finished clean session counts toward the one-time
+            // donation prompt (shows after the 2nd completed session).
+            DonationPrefs.noteSessionDone(context)
         }
     }
 
@@ -285,6 +300,14 @@ private fun DeckContent(
             ?.filter { m -> items.indexOfFirst { it.uri == m.uri } >= index }
             ?.sortedBy { m -> items.indexOfFirst { it.uri == m.uri } }
             .orEmpty()
+        // Batch M hotfix: a burst is never bulk-cleaned by ONE action — a
+        // Clean button or a list row lands here too, and one misflick must
+        // not queue a whole shoot (or a trip) for deletion. The keep-picker
+        // decides what survives; Keep stays group-wide (the safe direction).
+        if (action == "queued" && burst.size > 1) {
+            pickingBurst = burst
+            return
+        }
         val members = if (burst.size > 1) burst else listOf(item)
         for (m in members) {
             if (m.uri != item.uri) SuggestionEngine.observe(m, action)
@@ -311,7 +334,17 @@ private fun DeckContent(
         val last = history.last()
         // Batch H: a burst judgement is ONE decision covering every member.
         val members = last.group.ifEmpty { listOf(last.item) }
-        for (m in members) {
+        if (last.action == "mixed") {
+            // Batch L: the burst picker split ONE group into keeps and deletes
+            // — rewind each member to its own side of the verdict.
+            for (m in members) {
+                when {
+                    m.uri.toString() in last.keptUris -> KeepSafe.remove(context, m.uri)
+                    m.uri.toString() in last.queuedUris ->
+                        queue = queue.filterNot { it.uri == m.uri }
+                }
+            }
+        } else for (m in members) {
             if (last.action == "queued") {
                 queue = queue.filterNot { it.uri == m.uri }
             } else {
@@ -364,6 +397,35 @@ private fun DeckContent(
         }
     })
 
+    // Batch L: burst picker verdict — one group, two fates. Keeps land in
+    // Keep Safe immediately; deletes join the queue and open THE SAME
+    // confirm sheet as every other delete in the app (the safety retreat
+    // holds: nothing leaves the device without the thumbnail sheet).
+    fun applyBurstPick(members: List<MediaItem>, keep: List<MediaItem>) {
+        val rep = members.first()
+        var deletes: List<MediaItem> = emptyList()
+        if (history.lastOrNull()?.item?.uri != rep.uri) {
+            val keepUris = keep.map { it.uri.toString() }.toSet()
+            deletes = members.filter { it.uri.toString() !in keepUris }
+            keep.forEach { KeepSafe.add(context, it.uri) }
+            for (m in deletes) {
+                if (queue.none { it.uri == m.uri }) queue = queue + m
+            }
+            history = history + DeckDecision(
+                rep, "mixed", members,
+                keepUris, deletes.map { it.uri.toString() }.toSet()
+            )
+            index = members.maxOf { m -> items.indexOfFirst { it.uri == m.uri } + 1 }
+            persist()
+            monthGateCheck(members.last())
+            phase = if (index >= items.size) {
+                if (queue.isNotEmpty()) "summary" else "empty"
+            } else "deck"
+        }
+        pickingBurst = null
+        if (deletes.isNotEmpty()) purge(deletes)
+    }
+
     // First-run coach marks (Batch C): teach the three gestures once, ever.
     var showCoach by remember { mutableStateOf(!DeckPrefs.coachDone(context)) }
     if (showCoach && phase == "deck") {
@@ -391,10 +453,12 @@ private fun DeckContent(
                         }
                     },
                     actions = {
-                        // Batch I: month picking must ALWAYS be reachable in
+                        // Batch I/L: month picking must ALWAYS be reachable in
                         // the swipe-up deck — the calendar button sits in the
                         // top bar beside the pill and the swipe-up gesture.
-                        if (phase == "deck" && monthSlices.size > 1) {
+                        // Batch L: shown even with ONE month, so the picker is
+                        // never invisible on a collapsed library.
+                        if (phase == "deck" && monthSlices.isNotEmpty()) {
                             IconButton(onClick = { pickerOpen = true }) {
                                 Icon(
                                     Icons.Default.CalendarMonth,
@@ -430,7 +494,10 @@ private fun DeckContent(
                             color = cs.onSurfaceVariant
                         )
                     }
-                    if (monthSlices.size > 1) {
+                    // Batch L: the pill shows even with one month — it names
+                    // the bucket and opens the picker, so the feature is
+                    // never silently hidden.
+                    if (monthSlices.isNotEmpty()) {
                         val curKey = items.getOrNull(index)
                             ?.let { Scanner.monthKeyOf(it) }
                         val curSlice = monthSlices.firstOrNull { s -> s.key == curKey }
@@ -526,7 +593,8 @@ private fun DeckContent(
                         resumedAt = resumedAt,
                         canUndo = history.isNotEmpty(),
                         burstIndex = burstIndex,
-                        onSwipeUp = if (monthSlices.size > 1) ({ pickerOpen = true }) else null,
+                        onSwipeUp = if (monthSlices.isNotEmpty()) ({ pickerOpen = true }) else null,
+                        onOpenBurstPick = { pickingBurst = it },
                         onDecide = ::decide,
                         onUndo = ::undo,
                         onPreview = { previewItem = it },
@@ -616,6 +684,16 @@ private fun DeckContent(
         onDismiss = { pickerOpen = false }
     )
 
+    // Batch L: the burst keep-picker — one stack card, N photos, choose the
+    // survivors. Deletes route through the same confirm sheet as everything.
+    pickingBurst?.let { members ->
+        BurstPicker(
+            members = members,
+            onConfirm = { keep -> applyBurstPick(members, keep) },
+            onDismiss = { pickingBurst = null }
+        )
+    }
+
     // Month-end gate (Batch H): finishing a month pauses the deck —
     // "October is clean → continue?" — instead of silently sliding into
     // the next one. The deck is ALREADY showing the next month's first
@@ -656,18 +734,23 @@ private fun DeckPhase(
     onDecide: (MediaItem, String) -> Unit,
     onUndo: () -> Unit,
     onPreview: (MediaItem) -> Unit,
+    // Batch L: called with the current card's pending burst members when
+    // the stack card is tapped — opens the keep-picker.
+    onOpenBurstPick: (List<MediaItem>) -> Unit = {},
     onPurge: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
     val current = items.getOrNull(index)
-    // How many shots of the current card's burst are still unjudged from
-    // here — >1 turns on the "Burst ×N" badge and group-judging.
-    val burstCount = current?.let { cur ->
+    // Batch L: the pending members of the current card's burst — non-empty
+    // turns the card into a STACK: tap opens the keep-picker, the sheets
+    // behind are plain stand-ins, and one verdict covers every member.
+    val burstMembers = current?.let { cur ->
         burstIndex[cur.uri.toString()]
-            ?.count { m -> items.indexOfFirst { it.uri == m.uri } >= index }
-            ?.takeIf { it > 1 }
-            ?: 0
-    } ?: 0
+            ?.filter { m -> items.indexOfFirst { it.uri == m.uri } >= index }
+            ?.sortedBy { m -> items.indexOfFirst { it.uri == m.uri } }
+            ?.takeIf { it.size > 1 }
+    } ?: emptyList()
+    val burstCount = burstMembers.size
 
     // Swipe side glow: -1f = card being thrown left (clean → red), +1f =
     // thrown right (keep → green). DeckCard reports drag frames and a 0f
@@ -719,12 +802,34 @@ private fun DeckPhase(
             // the side being thrown toward lights up (Batch F: radial wash,
             // no more top/bottom clipping; knobs live in CuraDesign)
             DeckSideGlow(state = glowState)
-            // next cards peeking behind
-            for (depth in 2 downTo 1) {
-                val next = items.getOrNull(index + depth)
-                if (next != null) {
-                    DeckCard(
-                        item = next,
+            // next cards peeking behind. Batch L: while a burst stack is on
+            // top, the members behind it are NOT real previews — plain
+            // sheets stand in until the whole group is judged.
+            if (burstMembers.isEmpty()) {
+                for (depth in 2 downTo 1) {
+                    val next = items.getOrNull(index + depth)
+                    if (next != null) {
+                        DeckCard(
+                            item = next,
+                            modifier = Modifier
+                                .width(cardWidth)
+                                .aspectRatio(0.72f)
+                                .graphicsLayer {
+                                    val shrink = 1f - 0.05f * depth
+                                    scaleX = shrink
+                                    scaleY = shrink
+                                    translationY = 40f * depth
+                                    alpha = 1f - 0.25f * depth
+                                },
+                            interactive = false,
+                            onDecide = { _, _ -> },
+                            onPreview = onPreview
+                        )
+                    }
+                }
+            } else {
+                for (depth in 2 downTo 1) {
+                    Box(
                         modifier = Modifier
                             .width(cardWidth)
                             .aspectRatio(0.72f)
@@ -734,10 +839,9 @@ private fun DeckPhase(
                                 scaleY = shrink
                                 translationY = 40f * depth
                                 alpha = 1f - 0.25f * depth
-                            },
-                        interactive = false,
-                        onDecide = { _, _ -> },
-                        onPreview = onPreview
+                            }
+                            .clip(RoundedCornerShape(CuraDesign.radiusDeckCard))
+                            .background(cs.surfaceVariant)
                     )
                 }
             }
@@ -753,7 +857,9 @@ private fun DeckPhase(
                         onPreview = onPreview,
                         onDragProgress = { glowState.onDrag(it) },
                         onSwipeUp = onSwipeUp,
-                        burstCount = burstCount
+                        burstCount = burstCount,
+                        onOpenBurst = if (burstMembers.isNotEmpty())
+                            ({ onOpenBurstPick(burstMembers) }) else null
                     )
                 }
             }
@@ -834,6 +940,9 @@ internal fun DeckCard(
     onDragProgress: ((Float) -> Unit)? = null,
     onSwipeUp: (() -> Unit)? = null,
     burstCount: Int = 0,
+    // Batch L: non-null on a burst stack — the media tap opens the
+    // keep-picker instead of the single-photo preview.
+    onOpenBurst: (() -> Unit)? = null,
     // Batch K (Suggest redesign): the WHY rides ON the card — a colored tag
     // pill plus the engine's one-line reason, rendered in the info strip.
     // Null for every other deck, which keeps their info strips unchanged.
@@ -845,6 +954,17 @@ internal fun DeckCard(
     val thresholdPx = with(LocalDensity.current) { 130.dp.toPx() }
     val swipeUp = onSwipeUp
     val offsetX = remember { Animatable(0f) }
+    // Batch N hotfix: pointerInput(Unit) captures these ONCE per card, but
+    // burstIndex arrives async (the load effect hashes for up to ~3.5 s) and
+    // a card can outlive the state it was composed with — a stale capture
+    // made a burst flick fly the card OFF-SCREEN and then "refuse" in
+    // decide(), leaving a blank deck with the picker open. Live reads keep
+    // the gesture on the latest values without restarting the detector
+    // mid-drag.
+    val liveDecide by rememberUpdatedState(onDecide)
+    val liveItem by rememberUpdatedState(item)
+    val liveDragProgress by rememberUpdatedState(onDragProgress)
+    val liveOpenBurst by rememberUpdatedState(onOpenBurst)
     val isVideo = item.mime.startsWith("video/")
     val isMedia = item.mime.startsWith("image/") || isVideo
 
@@ -855,38 +975,60 @@ internal fun DeckCard(
                 rotationZ = (offsetX.value / 40f).coerceIn(-10f, 10f)
             }
             .pointerInput(Unit) {
+                // Batch N hotfix: dragX mirrors what offsetX WILL be — each
+                // frame's snapTo runs in a coroutine, so reading offsetX here
+                // could lag a frame behind the finger. Glow frames are now
+                // invoked SYNCHRONOUSLY in the drag callback (they only write
+                // state), so a frame can never land after onDragEnd's release
+                // and re-light the side wash — the Batch K "green/red light
+                // persists" bug, back via the burst refusal path.
+                var dragX = 0f
                 detectHorizontalDragGestures(
+                    onDragStart = {
+                        dragX = 0f
+                        scope.launch { offsetX.snapTo(0f) }
+                    },
                     onDragEnd = {
                         // the glow belongs to the drag — release it the moment
                         // the finger lifts, whichever way the card flies
-                        onDragProgress?.invoke(0f)
-                        val x = offsetX.value
+                        liveDragProgress?.invoke(0f)
+                        val x = dragX
                         scope.launch {
                             when {
                                 x > thresholdPx -> {
                                     offsetX.animateTo(2200f, tween(230))
-                                    onDecide(item, "kept")
+                                    liveDecide(liveItem, "kept")
                                 }
                                 x < -thresholdPx -> {
-                                    offsetX.animateTo(-2200f, tween(230))
-                                    onDecide(item, "queued")
+                                    // Batch M hotfix: a flick must never throw
+                                    // a whole burst away — snap back and open
+                                    // the keep-picker instead.
+                                    val openBurst = liveOpenBurst
+                                    if (openBurst != null) {
+                                        offsetX.animateTo(0f, spring())
+                                        openBurst()
+                                    } else {
+                                        offsetX.animateTo(-2200f, tween(230))
+                                        liveDecide(liveItem, "queued")
+                                    }
                                 }
                                 else -> offsetX.animateTo(0f, spring())
                             }
                         }
                     },
                     onDragCancel = {
-                        onDragProgress?.invoke(0f)
+                        liveDragProgress?.invoke(0f)
                         scope.launch { offsetX.animateTo(0f, spring()) }
                     },
                     onHorizontalDrag = { change, amount ->
                         change.consume()
+                        dragX += amount
+                        // -1f..1f: how far into a full throw this drag is
+                        liveDragProgress?.invoke(
+                            (dragX / thresholdPx).coerceIn(-1f, 1f)
+                        )
                         scope.launch {
-                            offsetX.snapTo(offsetX.value + amount)
-                            // -1f..1f: how far into a full throw this drag is
-                            onDragProgress?.invoke(
-                                (offsetX.value / thresholdPx).coerceIn(-1f, 1f)
-                            )
+                            offsetX.snapTo(dragX)
                         }
                     }
                 )
@@ -950,8 +1092,11 @@ internal fun DeckCard(
                     .fillMaxWidth()
                     .weight(1f)
                     .background(cs.surfaceVariant)
-                    // tap the media to Quick Look it (only the active card)
-                    .clickable(enabled = interactive) { onPreview(item) }
+                    // tap the media to Quick Look it (only the active card);
+                    // Batch L: on a burst stack the tap opens the keep-picker
+                    .clickable(enabled = interactive) {
+                        if (onOpenBurst != null) onOpenBurst() else onPreview(item)
+                    }
             ) {
                 if (isMedia) {
                     AsyncImage(
@@ -1036,7 +1181,7 @@ internal fun DeckCard(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            stringResource(R.string.deck_burst_hint, burstCount),
+                            stringResource(R.string.deck_burst_hint),
                             fontSize = 11.sp,
                             color = cs.onSurfaceVariant,
                             maxLines = 1
@@ -1112,6 +1257,12 @@ class DeckGlowState {
         if (value == 0f) {
             if (dragValue != 0f) {
                 releaseStart = dragValue
+                // Batch N hotfix: zero the tracked value WITH the release —
+                // dragValue used to stay at the last frame, so any effect
+                // restart that fell into the tracking branch after the
+                // release re-pinned the wash fully lit and it froze there
+                // (the returned "green/red light persists" report).
+                dragValue = 0f
                 releaseTick += 1
             }
         } else {

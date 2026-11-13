@@ -63,9 +63,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.celtaury.cura.core.DeckPrefs
+import com.celtaury.cura.core.DonationPrefs
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.PermissionGate
+import com.celtaury.cura.core.PhotoMind
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.SuggestEngine
@@ -74,6 +76,7 @@ import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
+import com.celtaury.cura.ui.deck.BurstPicker
 import com.celtaury.cura.ui.deck.DeckCard
 import com.celtaury.cura.ui.deck.SwipeActionItem
 import com.celtaury.cura.ui.deck.SummaryPhase
@@ -97,6 +100,21 @@ import coil.compose.AsyncImage
  * card composable (DeckCard), same summary/done flow, same resume behavior.
  */
 private const val DECK_ID = "suggest"
+
+/** One Suggest decision — a burst GROUP card judges (or hand-picks) every
+ *  member at once, so undo must rewind the whole group, not just the rep.
+ *  Batch M: "mixed" carries the exact keep/delete split from the picker.
+ *  Batch M hotfix: a picker verdict opened from a LIST row removes the rep
+ *  card in place — undo needs the card AND its slot to restore it. */
+private data class SugDecision(
+    val item: MediaItem,
+    val action: String,              // "kept" · "queued" · "mixed"
+    val group: List<MediaItem> = emptyList(),
+    val keptUris: Set<String> = emptySet(),
+    val queuedUris: Set<String> = emptySet(),
+    val repCard: SuggestEngine.Suggestion? = null,
+    val repIndex: Int = -1
+)
 
 /**
  * Chip labels for the deck's internal tag keys — localized (v2: the chip
@@ -138,11 +156,13 @@ private fun SuggestContent(onBack: () -> Unit) {
     var cards by remember { mutableStateOf<List<SuggestEngine.Suggestion>>(emptyList()) }
     var index by remember { mutableIntStateOf(0) }
     var queue by remember { mutableStateOf(listOf<MediaItem>()) }
-    var history by remember { mutableStateOf(listOf<Pair<MediaItem, String>>()) }
+    var history by remember { mutableStateOf(listOf<SugDecision>()) }
     var resumedAt by remember { mutableStateOf(-1) }
     var sessionSaved by remember { mutableStateOf(0L) }
     var allTimeSaved by remember { mutableStateOf(0L) }
     var previewItem by remember { mutableStateOf<MediaItem?>(null) }
+    // Batch M: the burst group currently open in the keep-picker (null = closed).
+    var pickingBurst by remember { mutableStateOf<List<MediaItem>?>(null) }
     // List ⇄ deck view (Batch H): the Suggest deal can be judged as rows.
     var deckView by remember { mutableStateOf(DeckPrefs.isDeck(context, DECK_ID)) }
 
@@ -161,6 +181,23 @@ private fun SuggestContent(onBack: () -> Unit) {
                 val item = byId[id] ?: return@mapNotNull null
                 if (KeepSafe.contains(context, item.uri)) return@mapNotNull null
                 SuggestEngine.Suggestion(item, tag, SuggestEngine.reasonFor(context, item, tag), 0)
+            }
+            // Batch M: burst cards persist as (id, tag) only — re-attach the
+            // member list from a fresh grouping so a resumed session still
+            // judges (or hand-picks) the whole burst as ONE card.
+            if (restored.any { it.tag == "Burst extra" }) {
+                val inventory = Scanner.imageInventory(context)
+                val byUri = HashMap<String, List<MediaItem>>()
+                for (g in PhotoMind.burstGroupsOf(context, inventory)) {
+                    for (m in g) byUri[m.uri.toString()] = g
+                }
+                restored = restored.map { s ->
+                    if (s.tag == "Burst extra") {
+                        s.copy(group = byUri[s.item.uri.toString()].orEmpty())
+                    } else {
+                        s
+                    }
+                }
             }
         }
         if (seed == null && restored.size >= 2) {
@@ -192,6 +229,9 @@ private fun SuggestContent(onBack: () -> Unit) {
     LaunchedEffect(phase) {
         if (phase == "done") {
             allTimeSaved = withContext(Dispatchers.IO) { SavedStats.savedBytes(context) }
+            // Batch M: a finished Suggest round counts toward the one-time
+            // donation prompt (shows after the 2nd completed session).
+            DonationPrefs.noteSessionDone(context)
         }
     }
 
@@ -201,14 +241,30 @@ private fun SuggestContent(onBack: () -> Unit) {
     }
 
     fun decide(item: MediaItem, action: String) {
-        SuggestPrefs.markJudged(context, item.uri.toString())
-        SuggestionEngine.observe(item, action)   // the tile's brain learns too
-        if (action == "kept") {
-            KeepSafe.add(context, item.uri, "Suggestions")
-        } else {
-            queue = queue + item
+        // Batch M: a burst GROUP card judges the whole burst — every member
+        // gets the verdict, marked judged, and one undo rewinds them all.
+        val group = cards.getOrNull(index)
+            ?.takeIf { it.item.uri == item.uri }
+            ?.group
+            .orEmpty()
+        // Batch M hotfix: a burst is never bulk-cleaned by ONE swipe or
+        // button — the keep-picker decides what survives. One misflick must
+        // not queue a whole shoot (or a trip) for deletion.
+        if (action == "queued" && group.size > 1) {
+            pickingBurst = group
+            return
         }
-        history = history + (item to action)
+        val members = if (group.size > 1) group else listOf(item)
+        for (m in members) {
+            SuggestPrefs.markJudged(context, m.uri.toString())
+            if (action == "kept") {
+                KeepSafe.add(context, m.uri, "Suggestions")
+            } else if (queue.none { it.uri == m.uri }) {
+                queue = queue + m
+            }
+        }
+        SuggestionEngine.observe(item, action)   // the tile's brain learns too
+        history = history + SugDecision(item, action, if (group.size > 1) group else emptyList())
         index += 1
         persist()
         phase = if (index >= cards.size) {
@@ -245,22 +301,35 @@ private fun SuggestContent(onBack: () -> Unit) {
      * deck-gesture feature; the list is for fast row-by-row triage.
      */
     fun listDecide(item: MediaItem, action: String) {
-        when (action) {
-            "kept" -> {
-                KeepSafe.add(context, item.uri, "Suggestions")
-                SuggestionEngine.observe(item, "kept")
+        // Batch M: a burst row judges the whole group, same as the deck card.
+        val group = cards.firstOrNull { it.item.uri == item.uri }?.group.orEmpty()
+        // Batch M hotfix: same rule as the deck — a burst row is never
+        // bulk-cleaned by one swipe; the keep-picker opens instead.
+        if (action == "queued" && group.size > 1) {
+            pickingBurst = group
+            return
+        }
+        val members = if (group.size > 1) group else listOf(item)
+        if (action != "skip") {
+            SuggestionEngine.observe(item, action)
+        }
+        for (m in members) {
+            when (action) {
+                "kept" -> KeepSafe.add(context, m.uri, "Suggestions")
+                "queued" -> if (queue.none { it.uri == m.uri }) queue = queue + m
             }
-            "queued" -> {
-                SuggestionEngine.observe(item, action)
-                queue = queue + item
+            if (action == "skip") {
+                SuggestPrefs.markSkipped(context, m.uri.toString())
+            } else {
+                SuggestPrefs.markJudged(context, m.uri.toString())
             }
         }
-        if (action == "skip") {
-            SuggestPrefs.markSkipped(context, item.uri.toString())
-        } else {
-            SuggestPrefs.markJudged(context, item.uri.toString())
-        }
+        // Batch N hotfix: removing a card AHEAD of the deck pointer shifts
+        // the deal left — keep the pointer on the same next card, or the
+        // deck silently skips one on return.
+        val removedAt = cards.indexOfFirst { it.item.uri == item.uri }
         cards = cards.filterNot { it.item.uri == item.uri }
+        if (removedAt in 0 until index) index -= 1
         SuggestPrefs.setCards(context, cards.map { it.item.id to it.tag })
         persist()
         phase = if (index >= cards.size) {
@@ -271,15 +340,81 @@ private fun SuggestContent(onBack: () -> Unit) {
     fun undo() {
         val last = history.lastOrNull() ?: return
         history = history.dropLast(1)
-        index -= 1
-        unbury(listOf(last.first))
-        if (last.second == "queued") {
-            queue = queue.filterNot { it.uri == last.first.uri }
+        // Batch M: a burst decision rewinds EVERY member; "mixed" rewinds
+        // each member to its own side of the picker's split.
+        val members = last.group.ifEmpty { listOf(last.item) }
+        if (last.repCard != null && last.repIndex >= 0) {
+            // Batch M hotfix: a picker verdict removed the rep card in place
+            // — slot it back exactly where it sat and resume AFTER it.
+            val at = last.repIndex.coerceIn(0, cards.size)
+            val card = last.repCard
+            cards = cards.toMutableList().apply { add(at, card) }
+            index = (at + 1).coerceAtMost(cards.size)
         } else {
-            KeepSafe.remove(context, last.first.uri)
+            index -= 1
+        }
+        unbury(members)
+        if (last.action == "mixed") {
+            for (m in members) {
+                when {
+                    m.uri.toString() in last.keptUris -> KeepSafe.remove(context, m.uri)
+                    m.uri.toString() in last.queuedUris ->
+                        queue = queue.filterNot { it.uri == m.uri }
+                }
+            }
+        } else for (m in members) {
+            if (last.action == "queued") {
+                queue = queue.filterNot { it.uri == m.uri }
+            } else {
+                KeepSafe.remove(context, m.uri)
+            }
         }
         persist()
         phase = "deck"
+    }
+
+    /**
+     * Batch M: burst picker verdict in Suggest — one group, two fates.
+     * Keeps land in Keep Safe immediately; deletes join the queue and open
+     * THE SAME confirm sheet as every other delete in the app (the safety
+     * retreat holds: nothing leaves the device without the thumbnail sheet).
+     */
+    fun applyBurstPick(members: List<MediaItem>, keep: List<MediaItem>) {
+        val keepUris = keep.map { it.uri.toString() }.toSet()
+        val deletes = members.filter { it.uri.toString() !in keepUris }
+        for (m in members) {
+            SuggestPrefs.markJudged(context, m.uri.toString())
+        }
+        keep.forEach { KeepSafe.add(context, it.uri, "Suggestions") }
+        for (m in deletes) {
+            if (queue.none { it.uri == m.uri }) queue = queue + m
+        }
+        // Batch N hotfix: find the DEALT card by membership — exactly ONE
+        // card per burst is in the deal, but it is the group's first VIABLE
+        // EXTRA, not members.first() (that frame is usually the burst's
+        // cover/keeper and is not dealt at all). The old lookup returned -1,
+        // so the rep card was never removed and the deck never advanced:
+        // the same burst card stayed current, every further Clean swipe
+        // re-refused into the SAME unchecked picker — the user's "it refused
+        // and displayed the burst selection again, preference not saved".
+        // Undo still gets the card + slot back via repCard/repIndex.
+        val memberUris = members.mapTo(HashSet()) { it.uri.toString() }
+        val repIndex = cards.indexOfFirst { it.item.uri.toString() in memberUris }
+        val rep = if (repIndex >= 0) cards[repIndex] else null
+        history = history + SugDecision(
+            rep?.item ?: members.first(), "mixed", members,
+            keepUris, deletes.map { it.uri.toString() }.toSet(),
+            repCard = rep, repIndex = repIndex
+        )
+        if (rep != null) cards = cards.filterNot { it.item.uri == rep.item.uri }
+        // a card removed AHEAD of the deck pointer shifts the deal left —
+        // keep the pointer on the same next card
+        if (repIndex in 0 until index) index -= 1
+        persist()
+        pickingBurst = null
+        phase = if (index >= cards.size) {
+            if (queue.isNotEmpty()) "summary" else "empty"
+        } else "deck"
     }
 
     // Summary "Confirm & Clean" routes through the same in-app confirm sheet
@@ -464,6 +599,7 @@ private fun SuggestContent(onBack: () -> Unit) {
                         onUndo = ::undo,
                         onSkip = ::skip,
                         onPreview = { previewItem = it },
+                        onOpenBurstPick = { pickingBurst = it },
                         onPurge = { purge(queue) }
                     )
                 }
@@ -513,6 +649,17 @@ private fun SuggestContent(onBack: () -> Unit) {
             onDismiss = { previewItem = null }
         )
     }
+
+    // Batch M: the burst keep-picker — one group card, N photos, choose the
+    // keepers; the rest join the queue and open the same confirm sheet as
+    // every other delete in the app.
+    pickingBurst?.let { members ->
+        BurstPicker(
+            members = members,
+            onConfirm = { keep -> applyBurstPick(members, keep) },
+            onDismiss = { pickingBurst = null }
+        )
+    }
 }
 
 /**
@@ -544,10 +691,18 @@ private fun DeckPhase(
     onUndo: () -> Unit,
     onSkip: (MediaItem) -> Unit,
     onPreview: (MediaItem) -> Unit,
+    // Batch M: called with the current card's burst members when the stack
+    // card is tapped — opens the keep-picker.
+    onOpenBurstPick: (List<MediaItem>) -> Unit = {},
     onPurge: () -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
     val current = cards.getOrNull(index)
+    // Batch M: the current card's burst — non-empty (>1) turns the card
+    // into a STACK: tap opens the keep-picker, the sheets behind are plain
+    // stand-ins, and one verdict covers every member.
+    val burstMembers = current?.group.orEmpty()
+    val burstUp = burstMembers.size > 1
 
     Column(Modifier.fillMaxSize()) {
         if (resumedAt in 1 until cards.size && index == resumedAt) {
@@ -600,12 +755,35 @@ private fun DeckPhase(
             // back into a ~full-area height.
             val cardHeight = minOf(maxHeight - 24.dp, (maxWidth - 48.dp) / 0.72f)
             val cardWidth = cardHeight * 0.72f
-            // next cards peeking behind — identical stack to every deck
-            for (depth in 2 downTo 1) {
-                val next = cards.getOrNull(index + depth)
-                if (next != null) {
-                    DeckCard(
-                        item = next.item,
+            // next cards peeking behind — identical stack to every deck.
+            // Batch M: while a burst stack is on top, the cards behind are
+            // NOT real previews — plain sheets stand in until the group is
+            // judged (the group card IS the whole burst).
+            if (!burstUp) {
+                for (depth in 2 downTo 1) {
+                    val next = cards.getOrNull(index + depth)
+                    if (next != null) {
+                        DeckCard(
+                            item = next.item,
+                            modifier = Modifier
+                                .width(cardWidth)
+                                .aspectRatio(0.72f)
+                                .graphicsLayer {
+                                    val shrink = 1f - 0.05f * depth
+                                    scaleX = shrink
+                                    scaleY = shrink
+                                    translationY = 40f * depth
+                                    alpha = 1f - 0.25f * depth
+                                },
+                            interactive = false,
+                            onDecide = { _, _ -> },
+                            onPreview = onPreview
+                        )
+                    }
+                }
+            } else {
+                for (depth in 2 downTo 1) {
+                    Box(
                         modifier = Modifier
                             .width(cardWidth)
                             .aspectRatio(0.72f)
@@ -615,10 +793,9 @@ private fun DeckPhase(
                                 scaleY = shrink
                                 translationY = 40f * depth
                                 alpha = 1f - 0.25f * depth
-                            },
-                        interactive = false,
-                        onDecide = { _, _ -> },
-                        onPreview = onPreview
+                            }
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(cs.surfaceVariant)
                     )
                 }
             }
@@ -634,7 +811,9 @@ private fun DeckPhase(
                         onPreview = onPreview,
                         badgeLabel = tagLabelRes(current.tag).takeIf { it != 0 }
                             ?.let { stringResource(it) } ?: current.tag,
-                        badgeReason = current.reason
+                        badgeReason = current.reason,
+                        burstCount = burstMembers.size,
+                        onOpenBurst = if (burstUp) ({ onOpenBurstPick(burstMembers) }) else null
                     )
                 }
             }
