@@ -250,7 +250,12 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     letterSpacing = 1.sp,
                     color = cs.onBackground
                 )
-                IconButton(onClick = { onNavigate("settings") }) {
+                // 1.0: the gear sits in a subtle circle — bare icons melted
+                // into the header on busy wallpapers.
+                IconButton(
+                    onClick = { onNavigate("settings") },
+                    modifier = Modifier.background(cs.onBackground.copy(alpha = 0.12f), CircleShape)
+                ) {
                     Icon(
                         Icons.Default.Settings,
                         contentDescription = stringResource(R.string.common_settings_cd),
@@ -396,24 +401,40 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
 
             Spacer(Modifier.height(20.dp))
 
-            // ── Quick Clean Button with glowing border ──
-            val glowBrush = Brush.horizontalGradient(
-                colors = listOf(Mint, Leaf, Mint)
+            // ── Quick Clean Button — 1.0: FILLED with the leaf gradient
+            // (was a transparent pill that only outlined the glow) + a slow
+            // breathing pulse so the primary action reads as THE action.
+            val qcPulse = rememberInfiniteTransition(label = "qcPulse")
+            val qcScale by qcPulse.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.035f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1600, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "qcScale"
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.62f)
                     .height(52.dp)
                     .align(Alignment.CenterHorizontally)
+                    .graphicsLayer {
+                        scaleX = qcScale
+                        scaleY = qcScale
+                    }
                     .shadow(
-                        elevation = 8.dp,
+                        elevation = 10.dp,
                         shape = CircleShape,
                         ambientColor = Leaf.copy(alpha = 0.35f),
-                        spotColor = Leaf.copy(alpha = 0.45f)
+                        spotColor = Leaf.copy(alpha = 0.5f)
                     )
                     .clip(CircleShape)
-                    .background(cs.surface)
-                    .border(BorderStroke(1.8.dp, glowBrush), CircleShape)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(Color(0xFF4E7D63), Leaf)
+                        )
+                    )
                     .clickable { onNavigate("quick_clean") },
                 contentAlignment = Alignment.Center
             ) {
@@ -421,7 +442,7 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                     stringResource(R.string.dash_quick_clean),
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = cs.onSurface
+                    color = Color.White
                 )
             }
 

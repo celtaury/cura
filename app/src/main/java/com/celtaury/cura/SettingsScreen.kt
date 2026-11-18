@@ -9,7 +9,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +44,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.os.LocaleListCompat
 import com.celtaury.cura.core.CuraLinks
 import com.celtaury.cura.core.InstantDeletePrefs
+import com.celtaury.cura.core.RemindersPrefs
 import com.celtaury.cura.core.ThemePrefs
 import com.celtaury.cura.core.hasMediaAccess
 import com.celtaury.cura.core.isPartialMediaAccess
@@ -292,6 +297,69 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                             checked = instant,
                             onCheckedChange = { InstantDeletePrefs.set(context, it) }
                         )
+                    }
+                }
+
+                // ── Cleaning reminders (1.0): gentle nudge on a cadence you
+                // pick. Toggle arms/cancels the AlarmManager chain; the
+                // interval chips reshuffle it in place.
+                var remOn by remember { mutableStateOf(RemindersPrefs.enabled(context)) }
+                var remDays by remember { mutableIntStateOf(RemindersPrefs.intervalDays(context)) }
+                val remToggle = rememberReminderToggle()
+                SectionCard(title = stringResource(R.string.set_rem_title)) {
+                    Text(
+                        stringResource(R.string.set_rem_sub),
+                        fontSize = 12.sp,
+                        color = cs.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.set_rem_enable),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                stringResource(reminderIntervalLabel(remDays)),
+                                fontSize = 12.sp,
+                                color = cs.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = remOn,
+                            onCheckedChange = { on ->
+                                remToggle(context, on)
+                                remOn = on
+                            }
+                        )
+                    }
+                    if (remOn) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            stringResource(R.string.set_rem_interval),
+                            fontSize = 12.sp,
+                            color = cs.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            reminderIntervals.forEach { (value, label) ->
+                                FilterChip(
+                                    selected = remDays == value,
+                                    onClick = {
+                                        remDays = value
+                                        RemindersPrefs.setIntervalDays(context, value)
+                                    },
+                                    label = { Text(stringResource(label)) }
+                                )
+                            }
+                        }
                     }
                 }
 

@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.celtaury.cura.core.DeleteQueuePrefs
 import com.celtaury.cura.core.DonationPrefs
+import com.celtaury.cura.core.RemindersPrefs
 import com.celtaury.cura.core.JunkCategory
 import com.celtaury.cura.core.KeepSafe
 import com.celtaury.cura.core.MediaItem
@@ -274,6 +275,9 @@ fun QuickCleanScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                 // Batch M: a finished Quick Clean counts toward the one-time
                 // donation prompt (shows after the 2nd completed session).
                 DonationPrefs.noteSessionDone(context)
+                // 1.0: reminders ride the same moment — first finished
+                // session offers the popup; an active reminder re-anchors.
+                RemindersPrefs.noteSessionDone(context)
             }
 
             Toast.makeText(context, context.getString(R.string.common_cleaned_ok), Toast.LENGTH_SHORT).show()

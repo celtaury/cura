@@ -42,7 +42,7 @@ object CuraDesign {
     val iconTile = 46.dp        // dashboard feature-card icon tile
 
     // ── motion ───────────────────────────────────────────
-    const val glowFadeMs = 280  // swipe-glow fade-out on release
+    const val glowFadeMs = 400  // swipe-glow fade-out (1.0.2: softer, user report)
 
     // ── swipe glow ───────────────────────────────────────
     val glowSave = Color(0xFF2ECC71)    // green — thrown right

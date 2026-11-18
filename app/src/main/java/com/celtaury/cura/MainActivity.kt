@@ -64,6 +64,8 @@ fun CuraApp() {
             CuraNav()
             // Batch M: the one-time donation prompt floats above every route.
             DonationPopupDialog()
+            // 1.0: the one-time cleaning-reminder offer, same pattern.
+            ReminderPopupDialog()
         }
     }
 }

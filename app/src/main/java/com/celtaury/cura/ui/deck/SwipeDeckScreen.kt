@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -31,11 +32,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Button
@@ -61,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -81,6 +88,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -95,10 +103,13 @@ import com.celtaury.cura.core.PermissionGate
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.Scanner
 import com.celtaury.cura.core.SuggestionEngine
+import com.celtaury.cura.core.CompressResult
+import com.celtaury.cura.core.compressImage
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.monthLabelOf
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
+import com.celtaury.cura.core.RemindersPrefs
 import com.celtaury.cura.ui.preview.MediaPreviewDialog
 import com.celtaury.cura.ui.theme.CuraDesign
 import kotlinx.coroutines.Dispatchers
@@ -199,6 +210,10 @@ private fun DeckContent(
     var pickerOpen by remember { mutableStateOf(false) }
     // Batch L: the burst stack currently open in the keep-picker (null = closed).
     var pickingBurst by remember { mutableStateOf<List<MediaItem>?>(null) }
+    // 1.0.1 (user report: keep marks vanished on reopen): the picker's keep
+    // verdicts survive close/reopen within the session — keyed by the
+    // burst's representative uri. Cleared when the verdict is applied.
+    val burstKeepPrefs = remember { mutableStateMapOf<String, Set<String>>() }
 
     // Per-month slices of the deck (#7): month key → where its cards live.
     // Batch I: keyed by CAPTURE month (monthKeyOf(item)) — DATE_ADDED is the
@@ -276,6 +291,7 @@ private fun DeckContent(
             // Batch M: a finished clean session counts toward the one-time
             // donation prompt (shows after the 2nd completed session).
             DonationPrefs.noteSessionDone(context)
+            RemindersPrefs.noteSessionDone(context)
         }
     }
 
@@ -345,7 +361,7 @@ private fun DeckContent(
                 }
             }
         } else for (m in members) {
-            if (last.action == "queued") {
+            if (last.action == "queued" || last.action == "compressed") {
                 queue = queue.filterNot { it.uri == m.uri }
             } else {
                 KeepSafe.remove(context, m.uri)
@@ -423,7 +439,47 @@ private fun DeckContent(
             } else "deck"
         }
         pickingBurst = null
+        burstKeepPrefs.remove(members.first().uri.toString())
         if (deletes.isNotEmpty()) purge(deletes)
+    }
+
+    // 1.0.1 (user request: "compress button on all deck mode — more granular
+    // control"): compress THIS photo into Pictures/Cura Compressed and queue
+    // the ORIGINAL for the normal confirm-sheet delete — the gallery ends up
+    // with the light copy instead of the heavy one. Undo rewinds the
+    // queueing; the copy is a real file and stays. Bursts keep using the
+    // picker; the button hides on them.
+    var compressingUri by remember { mutableStateOf<String?>(null) }
+    fun compressCurrent(item: MediaItem) {
+        if (compressingUri != null) return
+        compressingUri = item.uri.toString()
+        scope.launch {
+            val res = withContext(Dispatchers.IO) {
+                compressImage(context, item, 75, 1600)
+            }
+            compressingUri = null
+            when (res) {
+                is CompressResult.Done -> {
+                    if (history.lastOrNull()?.item?.uri != item.uri) {
+                        queue = queue + item
+                        history = history + DeckDecision(item, "compressed")
+                        index += 1
+                        persist()
+                        monthGateCheck(item)
+                        phase = if (index >= items.size) {
+                            if (queue.isNotEmpty()) "summary" else "empty"
+                        } else "deck"
+                    }
+                    snack.showSnackbar(
+                        context.getString(R.string.deck_comp_saved, humanBytes(res.savedBytes))
+                    )
+                }
+                CompressResult.AlreadySmall ->
+                    snack.showSnackbar(context.getString(R.string.deck_comp_small))
+                is CompressResult.Failed ->
+                    snack.showSnackbar(context.getString(R.string.deck_comp_fail))
+            }
+        }
     }
 
     // First-run coach marks (Batch C): teach the three gestures once, ever.
@@ -598,7 +654,10 @@ private fun DeckContent(
                         onDecide = ::decide,
                         onUndo = ::undo,
                         onPreview = { previewItem = it },
-                        onPurge = { purge(queue) }
+                        onPurge = { purge(queue) },
+                        compressing = items.getOrNull(index)
+                            ?.let { compressingUri == it.uri.toString() } ?: false,
+                        onCompress = { items.getOrNull(index)?.let { compressCurrent(it) } }
                     )
                 }
             }
@@ -670,25 +729,32 @@ private fun DeckContent(
             pickerOpen = false
             // Batch I: month picking that actually PICKS — forward to the
             // first un-judged card of a month ahead, or BACKWARD into a
-            // month already passed (skipped months were untappable before:
-            // the sidebar confused "behind the cursor" with "judged").
-            // Cards from the new cursor forward become live again; the
-            // purge queue and the undo trail survive untouched.
-            val target = slice.indexes.filter { p -> p >= index }.minOrNull()
-                ?: slice.indexes.first()
+            // month already passed. 1.0.1 (user report: "the month picker
+            // did nothing"): the CURRENT month was both disabled AND a no-op
+            // (target == index short-circuited), so on a one-month library
+            // the whole drawer read as dead. Every row now acts — the
+            // current month REWINDS to its first card.
+            val forward = slice.indexes.filter { p -> p >= index }.minOrNull()
+            val target = if (forward == null || forward == index) {
+                slice.indexes.first()
+            } else forward
             if (target != index) {
                 index = target
                 persist()
             }
         },
+        enabled = { true },
         onDismiss = { pickerOpen = false }
     )
 
     // Batch L: the burst keep-picker — one stack card, N photos, choose the
     // survivors. Deletes route through the same confirm sheet as everything.
     pickingBurst?.let { members ->
+        val repKey = members.first().uri.toString()
         BurstPicker(
             members = members,
+            initialKeep = burstKeepPrefs[repKey].orEmpty(),
+            onKeeps = { burstKeepPrefs[repKey] = it },
             onConfirm = { keep -> applyBurstPick(members, keep) },
             onDismiss = { pickingBurst = null }
         )
@@ -737,7 +803,10 @@ private fun DeckPhase(
     // Batch L: called with the current card's pending burst members when
     // the stack card is tapped — opens the keep-picker.
     onOpenBurstPick: (List<MediaItem>) -> Unit = {},
-    onPurge: () -> Unit
+    onPurge: () -> Unit,
+    // 1.0.1: deck compress — null hides the button entirely.
+    compressing: Boolean = false,
+    onCompress: (() -> Unit)? = null
 ) {
     val cs = MaterialTheme.colorScheme
     val current = items.getOrNull(index)
@@ -757,6 +826,10 @@ private fun DeckPhase(
     // release; the state fades the glow out on release (Batch F — it used
     // to pop off instantly).
     val glowState = remember { DeckGlowState() }
+    // 1.0.1: the wash leaves with the card it belonged to — every decision
+    // path advances the cursor, and this starts the fade the moment it
+    // does. 1.0.2: the fade is soft (from the current wash), not a poof.
+    LaunchedEffect(index) { glowState.kill() }
 
     // Purge pill pulse: bump-scale the thumb-zone CTA each time the queue
     // grows, so it announces itself while you judge. Also fires once on
@@ -871,30 +944,74 @@ private fun DeckPhase(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Batch K: Clean now sits LEFT and Keep RIGHT — the buttons finally
-            // match the gestures they mirror (swipe left = clean, swipe right =
-            // keep) instead of fighting them.
-            Button(
-                onClick = { current?.let { onDecide(it, "queued") } },
-                modifier = Modifier.weight(1f).height(54.dp),
-                shape = MaterialTheme.shapes.large,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = cs.errorContainer,
-                    contentColor = cs.onErrorContainer
-                )
-            ) { Text(stringResource(R.string.common_btn_clean), fontWeight = FontWeight.Bold) }
-            TextButton(onClick = onUndo, enabled = canUndo) {
-                Text(stringResource(R.string.common_btn_undo))
+            // 1.0.2 (user report: the Q row "looks ugly and no one knows
+            // what the button will do" — mockup provided): round icon
+            // buttons with LABELS underneath, weight by importance —
+            // Keep filled and biggest (the safe direction), Clean outlined
+            // red, Undo and Shrink small and quiet. No more cryptic icon
+            // wedged between two wide buttons.
+            val canCompress = onCompress != null && current != null &&
+                current.mime.startsWith("image/") && current.sizeBytes >= 250_000 &&
+                burstCount <= 1
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DeckRoundAction(
+                    label = stringResource(R.string.deck_row_clean),
+                    color = cs.error,
+                    size = 56.dp,
+                    onClick = { current?.let { onDecide(it, "queued") } },
+                    enabled = current != null
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, tint = cs.error)
+                }
+                DeckRoundAction(
+                    label = stringResource(R.string.deck_row_undo),
+                    color = cs.onSurfaceVariant,
+                    size = 44.dp,
+                    onClick = onUndo,
+                    enabled = canUndo
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, tint = cs.onSurfaceVariant)
+                }
+                // 1.0.1 flow, new home: compress — keep the photo, lose the
+                // weight. Makes the small copy, queues the original for the
+                // confirm sheet, advances the card. Hidden on bursts (the
+                // keep-picker owns groups) and on non-image cards.
+                if (canCompress) {
+                    DeckRoundAction(
+                        label = stringResource(R.string.deck_row_shrink),
+                        color = cs.primary,
+                        size = 44.dp,
+                        onClick = { onCompress?.invoke() },
+                        enabled = !compressing
+                    ) {
+                        if (compressing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = cs.primary
+                            )
+                        } else {
+                            Icon(Icons.Default.Compress, contentDescription = null, tint = cs.primary)
+                        }
+                    }
+                }
+                DeckRoundAction(
+                    label = stringResource(R.string.deck_row_keep),
+                    color = cs.primary,
+                    size = 64.dp,
+                    filled = true,
+                    onClick = { current?.let { onDecide(it, "kept") } },
+                    enabled = current != null
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = cs.onPrimary)
+                }
             }
-            Button(
-                onClick = { current?.let { onDecide(it, "kept") } },
-                modifier = Modifier.weight(1f).height(54.dp),
-                shape = MaterialTheme.shapes.large,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = cs.tertiaryContainer,
-                    contentColor = cs.onTertiaryContainer
-                )
-            ) { Text(stringResource(R.string.common_btn_keep), fontWeight = FontWeight.Bold) }
         }
         // thumb-zone purge CTA — pulses when the queue grows
         if (queueSize > 0) {
@@ -951,7 +1068,7 @@ internal fun DeckCard(
 ) {
     val cs = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    val thresholdPx = with(LocalDensity.current) { 130.dp.toPx() }
+    val thresholdPx = with(LocalDensity.current) { 70.dp.toPx() }
     val swipeUp = onSwipeUp
     val offsetX = remember { Animatable(0f) }
     // Batch N hotfix: pointerInput(Unit) captures these ONCE per card, but
@@ -1095,6 +1212,11 @@ internal fun DeckCard(
                     // tap the media to Quick Look it (only the active card);
                     // Batch L: on a burst stack the tap opens the keep-picker
                     .clickable(enabled = interactive) {
+                        // 1.0.2 (user report: "no change on burst, nothing
+                        // happen" — Q's preview-on-tap hid the whole flow):
+                        // tap opens the keep-picker again, exactly like
+                        // Batch M. The 1.0.1 keep-mark persistence stays,
+                        // and the ✕N chip keeps working as the alternative.
                         if (onOpenBurst != null) onOpenBurst() else onPreview(item)
                     }
             ) {
@@ -1177,6 +1299,7 @@ internal fun DeckCard(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
                                 .background(cs.primaryContainer)
+                                .clickable(enabled = onOpenBurst != null) { onOpenBurst?.invoke() }
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                         Spacer(Modifier.width(8.dp))
@@ -1223,6 +1346,48 @@ internal fun DeckCard(
     }
 }
 
+/**
+ * 1.0.2: one round icon button + its label underneath (the deck action
+ * mockup). Filled variant = primary actions (Keep); outlined = the rest.
+ * The label is the feature — every action says what it does.
+ */
+@Composable
+private fun DeckRoundAction(
+    label: String,
+    color: Color,
+    size: Dp,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    filled: Boolean = false,
+    icon: @Composable () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .then(
+                    if (filled) Modifier.background(color, CircleShape)
+                    else Modifier.border(
+                        1.5.dp,
+                        color.copy(alpha = if (enabled) 1f else 0.35f),
+                        CircleShape
+                    )
+                )
+                .clip(CircleShape)
+                .clickable(enabled = enabled) { onClick() },
+            contentAlignment = Alignment.Center
+        ) { icon() }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp,
+            color = color.copy(alpha = if (enabled) 1f else 0.4f)
+        )
+    }
+}
+
 @Composable
 private fun SwipeHint(text: String, color: Color, modifier: Modifier = Modifier, alpha: Float) {
     Text(
@@ -1252,6 +1417,20 @@ class DeckGlowState {
         private set
     var releaseStart = 0f
         private set
+    var killTick by mutableIntStateOf(0)
+        private set
+
+    /** 1.0.1: zero the tracked values on ANY cursor move — swipe commit,
+     *  button, preview verdict, burst pick, undo. The wash must never ride
+     *  onto the next card. 1.0.2 (user report: Q's kill made it "poof"
+     *  disappear): kill no longer snaps the glow off — it bumps killTick
+     *  and DeckSideGlow fades from the CURRENT wash over the same soft
+     *  duration as a release. */
+    fun kill() {
+        dragValue = 0f
+        releaseStart = 0f
+        killTick += 1
+    }
 
     fun onDrag(value: Float) {
         if (value == 0f) {
@@ -1299,17 +1478,32 @@ private fun DeckSideGlow(
     // fully lit until the next drag. Releases are now tracked against a
     // seen-release counter instead, which only ever moves here.
     var seenRelease by remember { mutableIntStateOf(0) }
-    LaunchedEffect(state.dragTick, state.releaseTick) {
-        if (state.releaseTick > seenRelease) {
-            seenRelease = state.releaseTick
-            animate(
-                initialValue = state.releaseStart,
-                targetValue = 0f,
-                animationSpec = tween(CuraDesign.glowFadeMs, easing = FastOutSlowInEasing)
-            ) { value, _ -> display = value }
-            display = 0f   // guarantee a clean zero even if the tween is cut short
-        } else {
-            display = state.dragValue
+    var seenKill by remember { mutableIntStateOf(0) }
+    LaunchedEffect(state.dragTick, state.releaseTick, state.killTick) {
+        when {
+            // the finger lifted — fade from the release value (Batch F/K/N)
+            state.releaseTick > seenRelease -> {
+                seenRelease = state.releaseTick
+                animate(
+                    initialValue = state.releaseStart,
+                    targetValue = 0f,
+                    animationSpec = tween(CuraDesign.glowFadeMs, easing = FastOutSlowInEasing)
+                ) { value, _ -> display = value }
+                display = 0f   // guarantee a clean zero even if the tween is cut short
+            }
+            // 1.0.2: a decision moved the cursor — fade from the CURRENT
+            // wash, same soft duration. The residue guarantee of 1.0.1
+            // (the wash always ends at zero, always) without the poof.
+            state.killTick > seenKill -> {
+                seenKill = state.killTick
+                animate(
+                    initialValue = display,
+                    targetValue = 0f,
+                    animationSpec = tween(CuraDesign.glowFadeMs, easing = FastOutSlowInEasing)
+                ) { value, _ -> display = value }
+                display = 0f
+            }
+            else -> display = state.dragValue
         }
     }
 

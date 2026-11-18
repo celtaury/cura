@@ -9,6 +9,11 @@
     <!-- Partial photo access on Android 14+ -->
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
 
+    <!-- 1.0: cleaning reminders nudge via notifications (API 33+ gate) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 1.0: re-arm the reminder alarm after reboot / app update -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- For Android 12 and below (API 32 and lower) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -47,6 +52,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 1.0: the reminder chain — one silent receiver fires the
+             nudge and re-arms; the boot receiver restores it after reboot
+             or app update (both wipe AlarmManager registrations). -->
+        <receiver
+            android:name=".core.ReminderReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".core.ReminderBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- D1.5: per-app language persistence. With autoStoreLocales,
              AppCompatDelegate saves/restores the in-app language choice on

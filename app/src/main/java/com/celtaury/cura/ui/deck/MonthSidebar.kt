@@ -1,34 +1,24 @@
 package com.celtaury.cura.ui.deck
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,17 +33,22 @@ data class MonthSlice(val key: String, val indexes: List<Int>)
  * THE month picker, shared (Batch K — "use the month pick everywhere, and
  * make it work").
  *
- * A LEFT-SIDE drawer: opened by the deck's month pill, the top-bar calendar
- * button, a swipe UP on the deck card — and now also by the Browse gallery's
- * calendar button and tappable month headers. Every month is pickable: in
- * the deck a month ahead jumps to its first un-judged card and a passed
- * month REWINDS to its first card (skipped months come back instead of
- * reading as "judged"); in Browse it scrolls the grid to that month.
+ * 1.0.2: the left drawer is GONE. Two users in a row reported "the month
+ * picker did nothing" and the drawer's AnimatedVisibility path was the last
+ * suspect standing — so the sidebar now renders as a ModalBottomSheet, the
+ * exact mechanism the burst keep-picker uses, which is proven to open on
+ * every device this app ships to. Same API, same call sites (deck pill /
+ * calendar button / swipe-up, Browse calendar / month headers): a titled
+ * sheet, one row per month, every row tappable — in the deck a month ahead
+ * jumps to its first un-judged card, a passed month rewinds to its first
+ * card, and the CURRENT month rewinds too (1.0.1). In Browse it scrolls the
+ * grid to that month's header.
  *
  * [sliceDetail] renders each row's trailing text (deck: "N to judge" /
  * "revisit"; Browse: "N files · X MB") and [enabled] decides which rows are
- * tappable (deck: everything but the current month; Browse: all).
+ * tappable (the deck passes { true } since 1.0.1 — no dead rows, ever).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonthSidebar(
     visible: Boolean,
@@ -81,66 +76,57 @@ fun MonthSidebar(
         }
     }
 ) {
+    if (!visible) return
     val cs = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxSize()) {
-        AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(cs.scrim.copy(alpha = 0.45f))
-                    .pointerInput(Unit) { detectTapGestures { onDismiss() } }
-            )
-        }
-        AnimatedVisibility(
-            visible = visible,
-            enter = slideInHorizontally { -it } + fadeIn(),
-            exit = slideOutHorizontally { -it } + fadeOut()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = cs.surface
+    ) {
+        Text(
+            stringResource(R.string.deck_jump_month),
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 6.dp)
+        )
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 28.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(300.dp)
-                    .background(cs.surface)
-                    .padding(20.dp)
-            ) {
-                Text(
-                    stringResource(R.string.deck_jump_month),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    stringResource(R.string.deck_month_sub),
-                    fontSize = 12.sp,
-                    color = cs.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-                LazyColumn(Modifier.fillMaxHeight()) {
-                    items(slices, key = { it.key }) { slice ->
-                        val isCurrent = slice.key == currentKey
-                        val rowEnabled = enabled(slice)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isCurrent) cs.primaryContainer else Color.Transparent)
-                                .clickable(enabled = rowEnabled) { onPick(slice) }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                monthLabelOf(slice.key),
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                sliceDetail(slice),
-                                fontSize = 12.sp,
-                                color = detailColor(slice)
-                            )
-                        }
-                    }
+            slices.forEach { slice ->
+                val isEnabled = enabled(slice)
+                val rowAlpha = if (isEnabled) 1f else 0.45f
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(enabled = isEnabled) { onPick(slice) }
+                        .padding(horizontal = 24.dp, vertical = 13.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        monthLabelOf(slice.key),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                        color = cs.onSurface,
+                        modifier = Modifier.alpha(rowAlpha)
+                    )
+                    Text(
+                        sliceDetail(slice),
+                        fontSize = 12.sp,
+                        color = detailColor(slice),
+                        modifier = Modifier.alpha(rowAlpha)
+                    )
                 }
+            }
+            if (slices.isEmpty()) {
+                Text(
+                    stringResource(R.string.common_nothing_left),
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
+                )
             }
         }
     }

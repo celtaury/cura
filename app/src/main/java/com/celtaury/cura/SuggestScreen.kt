@@ -76,6 +76,7 @@ import com.celtaury.cura.core.SuggestionEngine
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import com.celtaury.cura.core.rememberConfirmableDelete
+import com.celtaury.cura.core.RemindersPrefs
 import com.celtaury.cura.ui.deck.BurstPicker
 import com.celtaury.cura.ui.deck.DeckCard
 import com.celtaury.cura.ui.deck.SwipeActionItem
@@ -232,6 +233,7 @@ private fun SuggestContent(onBack: () -> Unit) {
             // Batch M: a finished Suggest round counts toward the one-time
             // donation prompt (shows after the 2nd completed session).
             DonationPrefs.noteSessionDone(context)
+            RemindersPrefs.noteSessionDone(context)
         }
     }
 
