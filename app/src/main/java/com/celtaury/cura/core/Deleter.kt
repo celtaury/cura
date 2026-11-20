@@ -90,12 +90,13 @@ private fun trashOrDelete(context: Context, uri: Uri): Boolean {
 @Composable
 fun rememberDeleteController(
     onCleaned: (List<Uri>) -> Unit,
-    onCancelled: () -> Unit = {}
+    onCancelled: () -> Unit = {},
+    permanent: Boolean = false
 ): (List<Uri>) -> Unit {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val ladder = remember { SystemDeleteLadder(context, scope) }
+    val ladder = remember(permanent) { SystemDeleteLadder(context, scope, permanent = permanent) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
@@ -168,7 +169,8 @@ fun rememberDeleteController(
  */
 private class SystemDeleteLadder(
     private val context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val permanent: Boolean = false
 ) {
     var go: ((IntentSender) -> Unit)? = null
     var onCleaned: ((List<Uri>) -> Unit)? = null
@@ -329,9 +331,19 @@ private class SystemDeleteLadder(
     /** The single API-30+ call in the whole app, guarded right here. */
     private fun tryRequest(list: List<Uri>): PendingIntent? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            runCatching { MediaStore.createDeleteRequest(context.contentResolver, list) }
+            runCatching {
+                if (permanent) {
+                    MediaStore.createDeleteRequest(context.contentResolver, list)
+                } else {
+                    MediaStore.createTrashRequest(context.contentResolver, list, true)
+                }
+            }
                 .onFailure { e ->
-                    Log.e(TAG, "createDeleteRequest refused (${list.size} item(s))", e)
+                    Log.e(
+                        TAG,
+                        "${if (permanent) "createDeleteRequest" else "createTrashRequest(true)"} refused (${list.size} item(s))",
+                        e
+                    )
                 }
                 .getOrNull()
         } else {
@@ -384,6 +396,116 @@ private class SystemDeleteLadder(
  * nothing to restore. If the platform refuses, callers show the "open Files
  * app → Trash" hint.
  */
+/**
+ * 1.0.3 (user report: "it being hard to actually recover image"): restore
+ * walks a ladder that mirrors the delete ladder.
+ *
+ *   1. silent IS_TRASHED flip-back ([tryRestoreFromTrash]) — works whenever
+ *      the platform lets Cura touch the row;
+ *   2. Android 11+: whatever the silent pass REFUSED goes through
+ *      [MediaStore.createTrashRequest] with `false` — the system's own
+ *      un-trash consent dialog. When the user taps Allow, the platform
+ *      restores the row — this is the guarantee the silent pass could
+ *      never give for rows Cura doesn't own (most WhatsApp / gallery
+ *      content). Dialogs go out ≤100 items, strictly sequential.
+ *
+ * Pre-Android-11 refuses stay refused (no consent API exists there).
+ * [onRestored] fires with every URI actually back in the gallery; when
+ * nothing could be restored [onCancelled] fires instead — callers keep the
+ * log entry so the file stays restorable for another try.
+ */
+@Composable
+fun rememberRestoreController(
+    onRestored: (List<Uri>) -> Unit,
+    onCancelled: () -> Unit = {}
+): (List<Uri>) -> Unit {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val ladder = remember { RestoreLadder(context, scope) }
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result -> ladder.onDialogResult(result.resultCode == Activity.RESULT_OK) }
+    ladder.onRestored = onRestored
+    ladder.onCancelled = onCancelled
+    ladder.go = { sender ->
+        runCatching { launcher.launch(IntentSenderRequest.Builder(sender).build()) }
+            .onFailure { ladder.finish() }  // couldn't even ask — finish with what we have
+    }
+    return { uris: List<Uri> -> if (uris.isNotEmpty()) ladder.start(uris) }
+}
+
+private class RestoreLadder(
+    private val context: Context,
+    private val scope: CoroutineScope
+) {
+    var go: ((IntentSender) -> Unit)? = null
+    var onRestored: ((List<Uri>) -> Unit)? = null
+    var onCancelled: (() -> Unit)? = null
+
+    private val requests = ArrayDeque<List<Uri>>() // remaining consent dialogs
+    private var pendingUris = emptyList<Uri>()     // items the in-flight dialog answers for
+    private val restored = mutableListOf<Uri>()    // confirmed back in the gallery
+    private var refused = 0                        // denied by user or platform
+
+    fun start(uris: List<Uri>) {
+        requests.clear(); pendingUris = emptyList()
+        restored.clear(); refused = 0
+        scope.launch {
+            val done = withContext(Dispatchers.IO) { tryRestoreFromTrash(context, uris) }
+            restored += done
+            val silentRefused = uris.filter { it !in done }
+            if (silentRefused.isEmpty()) {
+                finish()
+                return@launch
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                silentRefused.chunked(CHUNK).forEach { requests.addLast(it) }
+                Log.i(TAG, "Silent restore: ${done.size} ok, ${silentRefused.size} need consent")
+                launchNext()
+            } else {
+                finish()
+            }
+        }
+    }
+
+    /** The system un-trash consent dialog came back. */
+    fun onDialogResult(ok: Boolean) {
+        val answered = pendingUris
+        pendingUris = emptyList()
+        if (ok) {
+            restored += answered
+        } else {
+            refused += answered.size
+        }
+        launchNext()
+    }
+
+    private fun launchNext() {
+        val next = requests.removeFirstOrNull()
+        if (next != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val pi = runCatching {
+                MediaStore.createTrashRequest(context.contentResolver, next, false)
+            }.onFailure { e ->
+                Log.e(TAG, "createTrashRequest(false) refused (${next.size} item(s))", e)
+            }.getOrNull()
+            if (pi != null) {
+                pendingUris = next
+                go?.invoke(pi.intentSender)
+                return
+            }
+        }
+        finish()
+    }
+
+    fun finish() {
+        if (restored.isNotEmpty()) {
+            onRestored?.invoke(restored.toList())
+        } else {
+            onCancelled?.invoke()
+        }
+    }
+}
+
 suspend fun tryRestoreFromTrash(context: Context, uris: List<Uri>): List<Uri> =
     withContext(Dispatchers.IO) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {

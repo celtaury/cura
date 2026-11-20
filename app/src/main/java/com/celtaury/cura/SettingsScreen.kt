@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.os.LocaleListCompat
 import com.celtaury.cura.core.CuraLinks
 import com.celtaury.cura.core.InstantDeletePrefs
+import com.celtaury.cura.core.openSystemFilesApp
 import com.celtaury.cura.core.RemindersPrefs
 import com.celtaury.cura.core.ThemePrefs
 import com.celtaury.cura.core.hasMediaAccess
@@ -379,12 +380,10 @@ fun SettingsScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
                     val filesHint = stringResource(R.string.common_files_hint)
                     TextButton(
                         onClick = {
-                            val ok = runCatching {
-                                val intent = Intent(Intent.ACTION_VIEW)
-                                intent.setPackage("com.google.android.documentsui")
-                                context.startActivity(intent)
-                            }.isSuccess
-                            if (!ok) {
+                            // 1.0.3: shared ladder (TrashScreen parity) — the
+                            // old single pinned package pin was a no-op on
+                            // most launchers.
+                            if (!openSystemFilesApp(context)) {
                                 Toast.makeText(
                                     context,
                                     filesHint,

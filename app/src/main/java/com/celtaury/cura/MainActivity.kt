@@ -19,11 +19,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.lifecycleScope
+import com.celtaury.cura.core.InstantDeletePrefs
+import com.celtaury.cura.core.TrashLog
 import com.celtaury.cura.core.SavedStats
 import com.celtaury.cura.core.ThemePrefs
 import com.celtaury.cura.ui.summary.SummaryScreen
 import com.celtaury.cura.ui.deck.DeckFlowForRoute
 import com.celtaury.cura.ui.theme.CuraTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * AppCompatActivity (D1.5): required for the per-app-language backport —
@@ -35,6 +40,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // 1.0.3: Instant-delete entries rest 5 days, not ~30 — the sweep
+        // runs at launch AND whenever the Trash screen reloads.
+        lifecycleScope.launch(Dispatchers.IO) {
+            InstantDeletePrefs.load(applicationContext)
+            TrashLog.purgeInstantExpired(applicationContext)
+        }
         setContent {
             Surface(modifier = Modifier.fillMaxSize()) {
                 CuraApp()

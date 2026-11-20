@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+/app/release/app-release.aab
+/APPLY.txt
+/app/release/Cura-1.0.2-release.apk
+/app/release/mapping.txt

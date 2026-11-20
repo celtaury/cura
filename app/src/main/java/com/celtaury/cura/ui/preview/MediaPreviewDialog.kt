@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -55,12 +58,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -70,6 +75,7 @@ import com.celtaury.cura.core.MediaItem
 import com.celtaury.cura.core.humanBytes
 import com.celtaury.cura.core.relativeDays
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import com.celtaury.cura.R
@@ -141,6 +147,24 @@ fun MediaPreviewDialog(
     } else null
     var isPlaying by remember(item.uri) { mutableStateOf(true) }
     var videoWasPlaying by remember { mutableStateOf(false) }
+    // 1.0.3 (user report: "video need progress slider"): the poll feeds the
+    // scrub bar; dragging pauses the feed and the seek lands on release.
+    var videoPosMs by remember(item.uri) { mutableStateOf(0L) }
+    var videoDurMs by remember(item.uri) { mutableStateOf(0L) }
+    var scrubbing by remember(item.uri) { mutableStateOf(false) }
+    if (isVideo) {
+        LaunchedEffect(item.uri) {
+            val p = exoPlayer ?: return@LaunchedEffect
+            while (true) {
+                if (!scrubbing) {
+                    videoPosMs = p.currentPosition.coerceAtLeast(0L)
+                    val dur = p.duration
+                    if (dur != C.TIME_UNSET && dur > 0L) videoDurMs = dur
+                }
+                delay(500)
+            }
+        }
+    }
     DisposableEffect(item.uri) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
@@ -451,6 +475,46 @@ fun MediaPreviewDialog(
                         }
                     }
 
+                    if (isVideo && videoDurMs > 0L) {
+                        Spacer(Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                formatMs(videoPosMs),
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                modifier = Modifier.width(46.dp)
+                            )
+                            Slider(
+                                value = videoPosMs.toFloat().coerceIn(0f, videoDurMs.toFloat()),
+                                onValueChange = {
+                                    scrubbing = true
+                                    videoPosMs = it.toLong()
+                                },
+                                onValueChangeFinished = {
+                                    exoPlayer?.seekTo(videoPosMs)
+                                    scrubbing = false
+                                },
+                                valueRange = 0f..videoDurMs.toFloat(),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color.White,
+                                    activeTrackColor = Color.White,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                formatMs(videoDurMs),
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.width(46.dp)
+                            )
+                        }
+                    }
+
                     Spacer(Modifier.height(16.dp))
 
                     // ── Gesture row: the buttons ARE the legend ──
@@ -495,6 +559,12 @@ fun MediaPreviewDialog(
  * One tappable gesture chip. Doubles as the gesture legend: lights up and
  * grows while the matching drag is armed, so the mapping is impossible to miss.
  */
+/** "1:07" — the slider's time labels. */
+private fun formatMs(ms: Long): String {
+    val totalSec = ms / 1000
+    return "%d:%02d".format(totalSec / 60, totalSec % 60)
+}
+
 @Composable
 private fun PreviewGestureChip(
     label: String,

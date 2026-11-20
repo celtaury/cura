@@ -6,14 +6,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * "Instant delete" (Batch C, Settings toggle): skip Cura's confirm sheet and
- * fire the delete flow straight away — for confident users who don't want
- * the "are you sure?" beat.
+ * "Instant delete" — REDEFINED in 1.0.3 (user report: the confirm button
+ * must NEVER be removed; what should change is the grace period):
  *
- * Honest by design: the system dialog on Android 11+ still shows (that one
- * belongs to the OS — Cura can't skip it), and every file still lands in
- * Trash & recovery for ~30 days. Default OFF — the confirm sheet stays the
- * safe default for everyone else.
+ * The in-app confirm sheet always shows, for everyone. What this toggle
+ * changes is how long Cura's trashed copies rest: flagged entries are
+ * hard-purged by Cura after [TrashLog.INSTANT_GRACE_DAYS] days (5) instead
+ * of riding out Android's usual ~30-day sweep — a shorter leash, "just in
+ * case". The system dialog on Android 11+ still belongs to the OS.
+ * Default OFF.
  */
 object InstantDeletePrefs {
 

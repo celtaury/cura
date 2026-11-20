@@ -138,6 +138,51 @@ private data class DeckDecision(
 )
 
 /**
+ * 1.0.3 (user report: "the undo does not work if we switched month"): the
+ * undo history now persists per deck (DeckPrefs raw JSON) — leaving via the
+ * month gate's "Later", or a process death mid-deck, no longer kills the
+ * Undo button. Entries re-hydrate against the freshly loaded items; any
+ * decision whose item no longer scans (deleted, trashed) is dropped.
+ */
+private fun historyToJson(history: List<DeckDecision>): String? {
+    if (history.isEmpty()) return null
+    val arr = org.json.JSONArray()
+    history.forEach { d ->
+        arr.put(
+            org.json.JSONObject().apply {
+                put("uri", d.item.uri.toString())
+                put("action", d.action)
+                put("group", org.json.JSONArray(d.group.map { it.uri.toString() }))
+                put("kept", org.json.JSONArray(d.keptUris.toList()))
+                put("queued", org.json.JSONArray(d.queuedUris.toList()))
+            }
+        )
+    }
+    return arr.toString()
+}
+
+private fun historyFromJson(raw: String, byUri: Map<String, MediaItem>): List<DeckDecision> =
+    runCatching {
+        val arr = org.json.JSONArray(raw)
+        (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val item = byUri[o.optString("uri")] ?: return@mapNotNull null
+            val uris = { key: String ->
+                o.optJSONArray(key)?.let { ja ->
+                    (0 until ja.length()).mapNotNull { ja.optString(it) }
+                } ?: emptyList()
+            }
+            DeckDecision(
+                item = item,
+                action = o.optString("action", "queued"),
+                group = uris("group").mapNotNull { byUri[it] },
+                keptUris = uris("kept").toSet(),
+                queuedUris = uris("queued").toSet()
+            )
+        }
+    }.getOrDefault(emptyList())
+
+/**
  * Route → deck registry. Every deck is scanner-backed; the eleven
  * never-navigated memory-backed routes (deck_qc_all, deck_soc_*, …) were
  * removed in Batch F — they could only ever render an empty deck.
@@ -208,6 +253,9 @@ private fun DeckContent(
     var sessionSaved by remember { mutableStateOf(0L) }
     var allTimeSaved by remember { mutableStateOf(0L) }
     var pickerOpen by remember { mutableStateOf(false) }
+    // 1.0.3: list mode hides KeepSafe'd files (deck swipes, past sessions,
+    // and list swipes). Refreshed by undo() so an undone keep reappears.
+    var listKeptHide by remember { mutableStateOf(KeepSafe.all(context)) }
     // Batch L: the burst stack currently open in the keep-picker (null = closed).
     var pickingBurst by remember { mutableStateOf<List<MediaItem>?>(null) }
     // 1.0.1 (user report: keep marks vanished on reopen): the picker's keep
@@ -241,6 +289,13 @@ private fun DeckContent(
     var monthGate by remember { mutableStateOf<String?>(null) }
 
     fun monthGateCheck(judgedLast: MediaItem) {
+        // 1.0.3 (user report: "swipe delete accidentally, it switched month,
+        // undo untappable"): the gate is a CHRONOLOGICAL-deck feature. The
+        // Large Files deck is sorted by SIZE, so months are scattered across
+        // the order — the gate fired on nearly every swipe ("it switched
+        // month") and its "Later" button exited the deck, which used to kill
+        // the session-only undo history. Size-sorted decks skip the gate.
+        if (route == "large_files") return
         val next = items.getOrNull(index) ?: return
         if (Scanner.monthKeyOf(judgedLast) !=
             Scanner.monthKeyOf(next)
@@ -272,6 +327,10 @@ private fun DeckContent(
         val restoredQueue = loaded.filter { it.uri.toString() in savedQueueUris }
         index = savedIndex.coerceIn(0, loaded.size)
         queue = restoredQueue
+        // 1.0.3: undo survives exits (the month gate's "Later", recents).
+        history = DeckPrefs.historyRaw(context, route)
+            ?.let { historyFromJson(it, loaded.associateBy { m -> m.uri.toString() }) }
+            ?: emptyList()
         items = loaded
         burstIndex = groups
             .flatMap { g -> g.map { m -> m.uri.toString() to g } }
@@ -298,6 +357,7 @@ private fun DeckContent(
     fun persist() {
         DeckPrefs.setIndex(context, route, index)
         DeckPrefs.setQueue(context, route, queue.map { it.uri.toString() })
+        DeckPrefs.setHistoryRaw(context, route, historyToJson(history))
     }
 
     fun decide(item: MediaItem, action: String) {
@@ -372,6 +432,8 @@ private fun DeckContent(
         history = history.dropLast(1)
         persist()
         phase = "deck"
+        // 1.0.3: an undone keep must REAPPEAR in list mode.
+        listKeptHide = KeepSafe.all(context)
         scope.launch {
             snack.showSnackbar(context.getString(R.string.deck_back_one))
         }
@@ -405,6 +467,7 @@ private fun DeckContent(
         val grantedUris = cleaned.map { it.uri }.toSet()
         queue = queue.filterNot { it.uri in grantedUris }
         history = emptyList()
+        DeckPrefs.setHistoryRaw(context, route, null)
         DeckPrefs.setQueue(context, route, queue.map { it.uri.toString() })
         scope.launch {
             snack.showSnackbar(
@@ -620,8 +683,14 @@ private fun DeckContent(
                     DeckListMode(
                         items = items,
                         queuedUris = queue.map { it.uri.toString() }.toSet(),
+                        // 1.0.3: keep-safed files (deck swipes, past sessions)
+                        // leave the list — plus undo, which the list lacked.
+                        hiddenUris = listKeptHide,
+                        canUndo = history.isNotEmpty(),
+                        onUndo = ::undo,
                         onKeep = { item ->
                             KeepSafe.add(context, item.uri)
+                            listKeptHide = listKeptHide + item.uri.toString()
                         },
                         onToggleQueue = { item ->
                             queue = if (queue.any { it.uri == item.uri }) {

@@ -1,5 +1,6 @@
 package com.celtaury.cura.core
 
+import android.os.Build
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -57,8 +58,11 @@ import com.celtaury.cura.R
  * swipe deck's summary, so selected items are always confirmed in-app first.
  * On success the batch lands in [TrashLog], which powers the Trash screen.
  *
- * Batch C: with [InstantDeletePrefs] enabled, the sheet is skipped entirely —
- * the same system flow (and the same trash log) fires straight away.
+ * 1.0.3 (user report: "on instant delete, we did not remove the
+ * confirmation button"): the sheet shows for EVERYONE again — Batch C's
+ * skip is gone. [InstantDeletePrefs] now only shortens the leash: entries
+ * recorded while it is ON are flagged and hard-purged by Cura after 5 days
+ * (TrashLog.purgeInstantExpired) instead of waiting out Android's ~30 days.
  *
  * Usage:
  *   val delete = rememberConfirmableDelete(onCleaned = { deletedItems -> ... })
@@ -97,7 +101,8 @@ fun rememberConfirmableDelete(
                                 uri = item.uri.toString(),
                                 name = item.displayName,
                                 bytes = item.sizeBytes,
-                                trashedAtMs = System.currentTimeMillis()
+                                trashedAtMs = System.currentTimeMillis(),
+                                instant = InstantDeletePrefs.enabled
                             )
                         }
                     )
@@ -108,13 +113,13 @@ fun rememberConfirmableDelete(
         onCancelled = onCancelled
     )
 
-    // Instant delete (Batch C): confident users skip the sheet entirely.
-    // Same system flow, same trash log — just without the "are you sure?".
+    // 1.0.3: the "are you sure?" sheet shows for EVERYONE — instant mode
+    // no longer hides it (user report). The toggle only flags entries for
+    // the shorter 5-day purge window.
     LaunchedEffect(Unit) { InstantDeletePrefs.load(context) }
-    val instant = InstantDeletePrefs.enabled
 
     val candidates = pending
-    if (candidates != null && !instant) {
+    if (candidates != null) {
         ConfirmDeleteSheet(
             items = candidates,
             onConfirm = {
@@ -127,16 +132,6 @@ fun rememberConfirmableDelete(
                 onCancelled()
             }
         )
-    }
-
-    // Instant mode: the picked batch fires straight through the SAME system
-    // flow — inFlight is set first so success still writes the trash log.
-    LaunchedEffect(candidates, instant) {
-        if (instant && candidates != null) {
-            inFlight = candidates
-            pending = null
-            systemDelete(candidates.map { it.uri })
-        }
     }
 
     return remember(onCleaned) {
@@ -251,6 +246,16 @@ private fun ConfirmDeleteSheet(
                     Text(
                         pluralStringResource(R.plurals.cd_button, items.size, items.size, humanBytes(bytes)),
                         fontWeight = FontWeight.Bold
+                    )
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.cd_system_dialog_hint),
+                        fontSize = 11.sp,
+                        color = cs.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
                 TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {

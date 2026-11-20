@@ -35,11 +35,29 @@ object DeckPrefs {
         prefs(context).edit().putString("q_$deckId", uris.joinToString("\n")).apply()
     }
 
+    /**
+     * 1.0.3 (user report: "the undo does not work if we switched month"):
+     * the undo history used to be session-only, so leaving the deck via the
+     * month-end gate's "Later" killed it. It now persists as a raw JSON
+     * string next to index and queue — the deck screen owns the
+     * serialization (DeckDecision is a UI type) and re-hydrates it against
+     * the freshly loaded item list on resume.
+     */
+    fun historyRaw(context: Context, deckId: String): String? =
+        prefs(context).getString("h_$deckId", null)
+
+    fun setHistoryRaw(context: Context, deckId: String, json: String?) {
+        prefs(context).edit().apply {
+            if (json == null) remove("h_$deckId") else putString("h_$deckId", json)
+        }.apply()
+    }
+
     /** Clear a deck's memory — used after a successful clean. */
     fun clear(context: Context, deckId: String) {
         prefs(context).edit()
             .remove("idx_$deckId")
             .remove("q_$deckId")
+            .remove("h_$deckId")
             .apply()
     }
 

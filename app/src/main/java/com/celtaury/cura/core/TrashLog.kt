@@ -2,6 +2,7 @@ package com.celtaury.cura.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.net.toUri
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -30,12 +31,22 @@ object TrashLog {
     /** Android's own trash window — the honest basis for "purges in ~N days". */
     const val TRASH_WINDOW_DAYS = 30L
 
+    /**
+     * 1.0.3 (user report: "we remove the 30 day grace period and change it
+     * to 5 day"): entries deleted while Instant delete was ON are Cura's
+     * business alone — after [INSTANT_GRACE_DAYS] Cura hard-deletes the
+     * trashed rows itself instead of waiting out Android's ~30-day sweep.
+     */
+    const val INSTANT_GRACE_DAYS = 5L
+
     /** One file Cura deleted. [uri] lets restore try the IS_TRASHED flip-back. */
     data class Entry(
         val uri: String,
         val name: String,
         val bytes: Long,
-        val trashedAtMs: Long
+        val trashedAtMs: Long,
+        /** Deleted while Instant delete was on — the 5-day grace applies. */
+        val instant: Boolean = false
     )
 
     /** Record a successful delete. Call from Dispatchers.IO. Dedupes by URI. */
@@ -67,6 +78,30 @@ object TrashLog {
         save(prefs, current.filterNot { it.uri in uris })
     }
 
+    /**
+     * 1.0.3: the Instant-delete sweep. Instant entries older than
+     * [INSTANT_GRACE_DAYS] get their (trashed) rows hard-deleted and leave
+     * the log. Rows the platform refuses (ghosts, OEM lockouts) just stay
+     * logged — nothing crashes, nothing is claimed that did not happen.
+     * Call from Dispatchers.IO.
+     */
+    fun purgeInstantExpired(context: Context): Int {
+        val now = System.currentTimeMillis()
+        val expired = entries(context).filter {
+            it.instant && now - it.trashedAtMs > INSTANT_GRACE_DAYS * 86_400_000L
+        }
+        if (expired.isEmpty()) return 0
+        val gone = mutableListOf<String>()
+        expired.forEach { entry ->
+            val ok = runCatching {
+                context.contentResolver.delete(entry.uri.toUri(), null, null) > 0
+            }.getOrDefault(false)
+            if (ok) gone.add(entry.uri)
+        }
+        removeRestored(context, gone.toSet())
+        return gone.size
+    }
+
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -80,6 +115,7 @@ object TrashLog {
                     put("name", entry.name)
                     put("bytes", entry.bytes)
                     put("trashedAtMs", entry.trashedAtMs)
+                    put("instant", entry.instant)
                 }
             )
         }
@@ -94,7 +130,8 @@ object TrashLog {
                 uri = o.optString("uri"),
                 name = o.optString("name", "(file)"),
                 bytes = o.optLong("bytes"),
-                trashedAtMs = o.optLong("trashedAtMs")
+                trashedAtMs = o.optLong("trashedAtMs"),
+                instant = o.optBoolean("instant", false)
             )
         }.filter { it.uri.isNotBlank() }
     }.getOrDefault(emptyList())

@@ -11,6 +11,9 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Toast
 import com.celtaury.cura.core.CuraStrings
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,12 +47,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -58,11 +64,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.celtaury.cura.core.TrashLog
 import com.celtaury.cura.core.humanBytes
+import com.celtaury.cura.core.openSystemFilesApp
 import com.celtaury.cura.core.rememberDeleteController
-import com.celtaury.cura.core.tryRestoreFromTrash
+import com.celtaury.cura.core.rememberRestoreController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -79,7 +85,9 @@ private data class TrashedFile(
     val uri: Uri,
     val name: String,
     val bytes: Long,
-    /** Epoch ms Android purges it (exact for live rows, ~30-day estimate for log rows). */
+    /** Days the trash keeps it: 30 normally, 5 for Instant-delete entries (1.0.3). */
+    val graceDays: Long,
+    /** Epoch ms the trash purges it (exact for live rows, an estimate for log rows). */
     val expiresAt: Long?,
     /** When Cura deleted it (log rows only). */
     val trashedAtMs: Long?,
@@ -118,12 +126,20 @@ fun TrashScreen(onBack: () -> Unit) {
     // (Declared BEFORE the purge/restore code below on purpose: Kotlin local
     //  functions cannot be referenced before their declaration point.)
     suspend fun reload() = withContext(Dispatchers.IO) {
+        // 1.0.3: Instant-delete entries older than 5 days are hard-deleted
+        // HERE, not at Android's 30-day leisure — that is the whole point
+        // of the shortened grace.
+        TrashLog.purgeInstantExpired(context)
         val logged = TrashLog.entries(context).map { entry ->
+            val grace = if (entry.instant) TrashLog.INSTANT_GRACE_DAYS else TrashLog.TRASH_WINDOW_DAYS
             TrashedFile(
-                uri = entry.uri.toUri(),
+                // 1.0.3: logged URIs can go stale (row renamed/swept by the
+                // OEM) — restore and thumbnails go through the LIVE row.
+                uri = refreshTrashedUri(context, entry.uri.toUri(), entry.name, entry.bytes),
                 name = entry.name,
                 bytes = entry.bytes,
-                expiresAt = entry.trashedAtMs + TrashLog.TRASH_WINDOW_DAYS * 86_400_000L,
+                graceDays = grace,
+                expiresAt = entry.trashedAtMs + grace * 86_400_000L,
                 trashedAtMs = entry.trashedAtMs,
                 fromLog = true
             )
@@ -156,7 +172,8 @@ fun TrashScreen(onBack: () -> Unit) {
                 purging = false
             }
         },
-        onCancelled = { purging = false }
+        onCancelled = { purging = false },
+        permanent = true
     )
 
     fun purgeConfirmed() {
@@ -184,29 +201,47 @@ fun TrashScreen(onBack: () -> Unit) {
         loading = false
     }
 
-    fun requestRestore(picked: List<TrashedFile>) {
-        if (restoring || picked.isEmpty()) return
-        restoring = true
-        scope.launch {
-            val total = picked.size
-            val restoredUris = tryRestoreFromTrash(context, picked.map { it.uri })
-            val restored = restoredUris.size
-            Toast.makeText(
-                context,
-                restoreToastMessage(context, restored, total),
-                Toast.LENGTH_LONG
-            ).show()
-            if (restoredUris.isNotEmpty()) {
+    // 1.0.3 (user report: "hard to actually recover image"): restore walks
+    // the same ladder the delete flow has — silent flip-back first, then
+    // the system's own un-trash consent dialog (createTrashRequest(false))
+    // for whatever the platform refused. The silent-only pass used to fail
+    // on most real content, because those rows belong to other apps.
+    var restoreTotal by remember { mutableStateOf(0) }
+    val restoreController = rememberRestoreController(
+        onRestored = { restoredUris ->
+            scope.launch {
+                Toast.makeText(
+                    context,
+                    restoreToastMessage(context, restoredUris.size, restoreTotal),
+                    Toast.LENGTH_LONG
+                ).show()
                 withContext(Dispatchers.IO) {
                     // Only entries that ACTUALLY came back may leave the log —
                     // a file the platform refused keeps its record (and its
                     // place on this screen) for another try.
                     TrashLog.removeRestored(context, restoredUris.map { it.toString() }.toSet())
                 }
+                reload()
+                restoring = false
             }
-            reload()
-            restoring = false
+        },
+        onCancelled = {
+            scope.launch {
+                Toast.makeText(
+                    context,
+                    restoreToastMessage(context, 0, restoreTotal),
+                    Toast.LENGTH_LONG
+                ).show()
+                restoring = false
+            }
         }
+    )
+
+    fun requestRestore(picked: List<TrashedFile>) {
+        if (restoring || picked.isEmpty()) return
+        restoring = true
+        restoreTotal = picked.size
+        restoreController(picked.map { it.uri })
     }
 
     // Hoisted into composition (a composable read): survives locale changes
@@ -214,12 +249,9 @@ fun TrashScreen(onBack: () -> Unit) {
     val filesHint = stringResource(R.string.common_files_hint)
 
     fun openFilesApp() {
-        val ok = runCatching {
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.setPackage("com.google.android.documentsui")
-            context.startActivity(intent)
-        }.isSuccess
-        if (!ok) {
+        // 1.0.3 (user report: "go to files dont actually work"): a real
+        // ladder over the Files apps instead of one fragile package pin.
+        if (!openSystemFilesApp(context)) {
             Toast.makeText(context, filesHint, Toast.LENGTH_LONG).show()
         }
     }
@@ -354,6 +386,15 @@ fun TrashScreen(onBack: () -> Unit) {
                         onClick = { openFilesApp() },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text(stringResource(R.string.trash_open_files_instead)) }
+                    // 1.0.3 (user report: "show where the trash is"): the
+                    // exact steps under the button, not buried in Settings.
+                    Text(
+                        stringResource(R.string.trash_files_steps),
+                        fontSize = 11.sp,
+                        color = cs.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+                    )
                     Text(
                         stringResource(R.string.trash_footer),
                         fontSize = 11.sp,
@@ -412,13 +453,62 @@ private fun TrashRow(file: TrashedFile, onRestore: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = file.uri,
-                contentDescription = file.name,
-                error = thumbFallback,
-                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
-                contentScale = ContentScale.Crop
-            )
+            // 1.0.3 (user report: thumbnails not showing): trashed rows are
+            // hidden from the plain queries Coil runs, so its load 404s and
+            // the doc icon showed instead. Decode ourselves — the thumbnail
+            // API first, the raw bytes second; the icon stays the honest
+            // fallback when the platform refuses both.
+            val context = LocalContext.current
+            val thumb by produceState<ImageBitmap?>(initialValue = null, key1 = file.uri) {
+                value = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.loadThumbnail(
+                            file.uri, android.util.Size(160, 160), null
+                        )
+                    }.recoverCatching {
+                        context.contentResolver.openInputStream(file.uri)?.use { input ->
+                            android.graphics.BitmapFactory.decodeStream(
+                                input,
+                                null,
+                                android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+                            )
+                        }
+                    }.getOrNull()?.asImageBitmap()
+                }
+            }
+            if (thumb != null) {
+                Image(
+                    bitmap = thumb!!,
+                    contentDescription = file.name,
+                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                val ext = file.name.substringAfterLast('.', "").uppercase().take(4)
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(cs.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (ext.isNotEmpty() && ext.length in 2..4) {
+                        Text(
+                            text = ext,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = cs.onSurfaceVariant
+                        )
+                    } else {
+                        Icon(
+                            thumbFallback,
+                            contentDescription = file.name,
+                            tint = cs.onSurfaceVariant,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -460,14 +550,97 @@ private fun restoreToastMessage(context: Context, restored: Int, total: Int): St
 }
 
 /**
+ * 1.0.3: a logged URI may no longer resolve (the row was swept, renamed or
+ * re-ided by the OEM) — look the trashed row back up by name and size to restore /
+ * draw thumbnails against the LIVE id. Returns the original URI when
+ * nothing better is found. Call from Dispatchers.IO.
+ */
+private fun refreshTrashedUri(context: Context, uri: Uri, name: String, bytes: Long = 0L): Uri {
+    if (rowExists(context, uri)) return uri
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return uri
+    val onR = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+    val collections = listOf(
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+        MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+        MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+        MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+    )
+    val hasSize = bytes > 0L
+    for (collection in collections) {
+        val found = runCatching {
+            if (onR) {
+                val bundle = Bundle().apply {
+                    putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
+                    val sel = if (hasSize) {
+                        "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
+                    } else {
+                        "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+                    }
+                    val args = if (hasSize) arrayOf(name, bytes.toString()) else arrayOf(name)
+                    putString(ContentResolver.QUERY_ARG_SQL_SELECTION, sel)
+                    putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
+                }
+                context.contentResolver.query(
+                    collection, arrayOf(MediaStore.MediaColumns._ID), bundle, null
+                )
+            } else {
+                val sel = if (hasSize) {
+                    "${MediaStore.MediaColumns.IS_TRASHED} = 1 AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
+                } else {
+                    "${MediaStore.MediaColumns.IS_TRASHED} = 1 AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+                }
+                val args = if (hasSize) arrayOf(name, bytes.toString()) else arrayOf(name)
+                context.contentResolver.query(
+                    collection,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    sel,
+                    args,
+                    null
+                )
+            }
+        }.recoverCatching {
+            // OEM refused the bundle — the plain selection still works on Q
+            val sel = if (hasSize) {
+                "${MediaStore.MediaColumns.IS_TRASHED} = 1 AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
+            } else {
+                "${MediaStore.MediaColumns.IS_TRASHED} = 1 AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+            }
+            val args = if (hasSize) arrayOf(name, bytes.toString()) else arrayOf(name)
+            context.contentResolver.query(
+                collection,
+                arrayOf(MediaStore.MediaColumns._ID),
+                sel,
+                args,
+                null
+            )
+        }.getOrNull()
+        found?.use { reader ->
+            if (reader.moveToFirst()) {
+                return ContentUris.withAppendedId(collection, reader.getLong(0))
+            }
+        }
+    }
+    return uri
+}
+
+/**
  * True when the MediaStore row still exists. Log entries the OS already
  * swept (its ~30-day trash purge) are ghosts — for them, "deleting" can
  * only mean leaving Cura's log.
  */
 private fun rowExists(context: Context, uri: Uri): Boolean = runCatching {
-    context.contentResolver
-        .query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
-        ?.use { it.count > 0 } == true
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val bundle = Bundle().apply {
+            putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_INCLUDE)
+        }
+        context.contentResolver
+            .query(uri, arrayOf(MediaStore.MediaColumns._ID), bundle, null)
+            ?.use { it.count > 0 } == true
+    } else {
+        context.contentResolver
+            .query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
+            ?.use { it.count > 0 } == true
+    }
 }.getOrDefault(false)
 
 /** "deleted 2 days ago · 1.4 MB · purges in ~28 days" — plain, honest words. */
@@ -493,7 +666,7 @@ private fun purgeLabel(file: TrashedFile): String {
     val now = System.currentTimeMillis()
     val daysLeft: Long? = when {
         file.fromLog && file.trashedAtMs != null ->
-            ((file.trashedAtMs + TrashLog.TRASH_WINDOW_DAYS * 86_400_000L - now) / 86_400_000L)
+            ((file.trashedAtMs + file.graceDays * 86_400_000L - now) / 86_400_000L)
                 .coerceAtLeast(0L)
         !file.fromLog && file.expiresAt != null ->
             ((file.expiresAt - now) / 86_400_000L).coerceAtLeast(0L)
@@ -520,8 +693,9 @@ private suspend fun queryTrash(context: Context): List<TrashedFile> =
         val onR = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
         val found = mutableListOf<TrashedFile>()
         val collections = listOf(
-            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL),
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         )
         for (collection in collections) {
             val projection = mutableListOf(
@@ -576,6 +750,7 @@ private suspend fun queryTrash(context: Context): List<TrashedFile> =
                             uri = ContentUris.withAppendedId(collection, reader.getLong(idCol)),
                             name = reader.getString(nameCol)?.ifBlank { "(file)" } ?: "(file)",
                             bytes = if (reader.isNull(sizeCol)) 0L else reader.getLong(sizeCol),
+                            graceDays = TrashLog.TRASH_WINDOW_DAYS,
                             expiresAt = expires,
                             trashedAtMs = null,
                             fromLog = false

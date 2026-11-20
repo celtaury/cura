@@ -602,7 +602,10 @@ fun DashboardScreen(onNavigate: (String) -> Unit) {
                 ),
                 FeatureTile(
                     stringResource(R.string.dash_open_more),
-                    Icons.Default.MoreHoriz,
+                    // 1.0.3 (user report): the trash glyph — this tile is the
+                    // road to Trash & recovery for most people, and the old
+                    // "more dots" said nothing about that.
+                    Icons.Default.Delete,
                     "more",
                     cs.surfaceVariant,
                     cs.onSurfaceVariant

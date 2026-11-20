@@ -66,13 +66,25 @@ fun DeckListMode(
     onToggleQueue: (MediaItem) -> Unit,
     onConfirm: () -> Unit,
     onPreview: (MediaItem) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // 1.0.3 (user report: "swiping a card into keep safe and then switching
+    // to list mode, the previous image keep-safed still present there"):
+    // the caller hands in every KeepSafe'd URI (deck swipes + past sessions)
+    // and those rows leave the list.
+    hiddenUris: Set<String> = emptySet(),
+    // 1.0.3 (user report: "also it lack the undo button"): list mode shares
+    // the deck's single-step undo.
+    canUndo: Boolean = false,
+    onUndo: (() -> Unit)? = null
 ) {
     val cs = MaterialTheme.colorScheme
     // Kept-this-session rows stay visible with a chip (no list churn) —
     // KeepSafe itself is already persisted by the caller.
     var keptUris by remember { mutableStateOf(setOf<String>()) }
-    val shown = items.filter { it.uri.toString() !in keptUris || it.uri.toString() in queuedUris }
+    val shown = items.filter {
+        val uri = it.uri.toString()
+        uri !in hiddenUris && (uri !in keptUris || uri in queuedUris)
+    }
     val queuedCount = shown.count { it.uri.toString() in queuedUris }
     val queuedBytes = shown.filter { it.uri.toString() in queuedUris }.sumOf { it.sizeBytes }
 
@@ -132,6 +144,18 @@ fun DeckListMode(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            if (onUndo != null) {
+                OutlinedButton(
+                    onClick = { onUndo?.invoke() },
+                    enabled = canUndo,
+                    shape = RoundedCornerShape(999.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 14.dp, vertical = 10.dp
+                    )
+                ) {
+                    Text(stringResource(R.string.common_btn_undo), fontSize = 12.sp)
+                }
+            }
             OutlinedButton(
                 onClick = {
                     val uris = shown.map { it.uri.toString() }.toSet()
