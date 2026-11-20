@@ -1,0 +1,28 @@
+Cura is a phone cleaner that does one job: find the clutter and delete only what you approve.
+
+Most cleaners want your data, your attention, or both. Cura is built the opposite way: it has no INTERNET permission, so it physically cannot send anything anywhere. Your photos and file list never leave your device. That isn't a policy promise — it's how the app is built.
+
+WHAT CURA DOES
+• Swipe Review — Swipe left to clean, right to keep. Fast, intuitive gallery triage with instant undo.
+• Burst Stacks & Full-Screen Viewer — Similar shots and rapid bursts group into a single stack[cite: 2]. Inspect frames full-screen and pick only the best ones to keep[cite: 4].
+• Smart Suggestions — Automatically surfaces blurry shots, old screenshots, duplicates, and clutter ready to clear.
+• Quick Clean — Scan junk and temporary files, then remove only what you choose.
+• WhatsApp Cleanup — Find the forwarded media, videos, and voice notes piling up in your chats.
+• Large Files & Compression — Spot the heavy videos eating your storage and shrink big files without losing them.
+• Smart Month Timeline — Browse and clean your library by capture date, even on migrated photos and screenshots[cite: 1].
+• KeepSafe — Protect important folders and files so they are never touched during a clean.
+
+WHAT CURA DOESN'T DO
+✗ No ads. Not one, not ever.
+✗ No tracking. There is nothing to track with — the app has zero internet access.
+✗ No fake "RAM boosting". Task killers are theater; Cura won't insult you with one.
+✗ No notification spam. Optional cleaning reminders only run if you turn them on.
+✗ No account, no sign-up, and no permissions beyond what storage cleaning needs.
+
+WHY NO INTERNET PERMISSION?
+Android apps must declare every capability they use. Cura declares zero network access — and because it is open source under the Apache-2.0 license, anyone can verify that claim directly in the source code (search "Cura Celtaury" on GitHub). An app that cannot connect cannot leak data, phone home, or download ads.
+
+INDEPENDENT & OPEN SOURCE
+Cura is built by Celtaury, an independent studio in Indonesia. One developer, no investors, no data business — made for people who just want a fast, honest tool to free up storage space.
+
+Free stays free. If Cura helps clear your phone, leaving a rating genuinely helps others find it.
